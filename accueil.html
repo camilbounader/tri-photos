@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tri Photos</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --fond:#111110;--fond2:#1a1a18;--carte:#22211f;--ligne:#33322e;--txt:#f1efe9;--doux:#a19e94;--faible:#6f6c64;
+  --vert:#3fae6a;--vert-f:#173a26;--rouge:#e0573f;--rouge-f:#3d1a14;--ambre:#e2a93b;--bleu:#6aa3e8;--bleu-f:#14263b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--fond);color:var(--txt);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+a{color:inherit}
+.btn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;cursor:pointer;background:var(--carte);border:1px solid var(--ligne);border-radius:999px;padding:8px 16px;white-space:nowrap}
+.btn:hover{border-color:var(--doux)}
+.btn.principal{background:var(--vert);border-color:var(--vert);color:#fff;font-weight:600}
+.btn.grand{padding:12px 22px;font-size:16px}
+.btn:disabled{opacity:.45;cursor:default}
+main{max-width:1280px;margin:auto;padding:28px clamp(16px,3vw,40px) 60px}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;margin-bottom:26px}
+h1{margin:0;font-size:clamp(28px,4vw,40px);letter-spacing:-.02em}
+.sous{color:var(--doux);margin-top:4px}
+.puces{display:flex;gap:8px;flex-wrap:wrap}
+.puce{font-size:13px;padding:5px 11px;border-radius:999px;background:var(--fond2);border:1px solid var(--ligne);color:var(--doux)}
+.puce.ok{color:#7fd8a1;border-color:#2a5a3c} .puce.alerte{color:#f3c86e;border-color:#5a4720}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--doux);margin:34px 0 12px;font-weight:600}
+.bloc{background:var(--fond2);border:1px solid var(--ligne);border-radius:16px;padding:18px 20px}
+.bloc.sd{background:var(--bleu-f);border-color:#2b4d74}
+.bloc.sd h3{margin:0 0 4px;font-size:18px}
+.ligne{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.champ{flex:1;min-width:200px;background:var(--fond);border:1px solid var(--ligne);border-radius:10px;padding:9px 12px}
+.note{color:var(--doux);font-size:13px;margin-top:8px}
+.actions-principales{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.chemin{display:none;margin-top:12px} .chemin.vu{display:flex}
+.lien{background:none;border:0;padding:0;color:var(--bleu);text-decoration:underline;cursor:pointer;font-size:14px}
+.tache{border-color:#2a5a3c;background:var(--vert-f)}
+.tache.erreur{border-color:var(--rouge);background:var(--rouge-f)}
+.tache h3{margin:0 0 2px;font-size:17px}
+.barre{height:10px;background:rgba(0,0,0,.35);border-radius:99px;overflow:hidden;margin:12px 0 6px}
+.barre i{display:block;height:100%;width:0;background:var(--vert);transition:width .4s}
+.barre.indet i{width:35%;animation:va 1.3s ease-in-out infinite}
+@keyframes va{0%{margin-left:-35%}100%{margin-left:100%}}
+.sorties{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+.sortie{background:var(--fond2);border:1px solid var(--ligne);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.sortie a.couv{display:block;aspect-ratio:3/2;background:var(--carte) center/cover no-repeat;position:relative}
+.sortie a.couv span{position:absolute;left:10px;top:10px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:rgba(0,0,0,.7)}
+.sortie .corps{padding:12px 14px;display:flex;flex-direction:column;gap:6px;flex:1}
+.sortie h4{margin:0;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sortie .date{color:var(--doux);font-size:13px}
+.comptes{display:flex;gap:12px;font-size:13px;font-variant-numeric:tabular-nums}
+.comptes .v{color:var(--vert)} .comptes .r{color:var(--rouge)}
+.sortie .pied{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:6px}
+.sortie .pied button{font-size:12px;padding:5px 10px}
+.sortie.absente{opacity:.55}
+.vide{color:var(--doux);text-align:center;padding:40px 20px;border:1px dashed var(--ligne);border-radius:14px}
+footer{margin-top:40px;display:flex;gap:10px;flex-wrap:wrap;border-top:1px solid var(--ligne);padding-top:18px}
+.tel{margin-top:12px;display:none} .tel.vu{display:block}
+.tel code{display:block;background:var(--fond);border:1px solid var(--ligne);border-radius:8px;padding:8px 10px;margin:6px 0;word-break:break-all;font-size:14px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--txt);color:var(--fond);padding:9px 16px;border-radius:999px;font-weight:600;z-index:80;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
+.toast.vu{opacity:1}
+@media (max-width:600px){ .sorties{grid-template-columns:1fr 1fr;gap:10px} .sortie .pied{display:none} h2{margin-top:26px} }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Tri Photos</h1>
+      <div class="sous">Trie tes sorties en local, gratuitement. Rien n'est envoyé sur internet.</div>
+    </div>
+    <div class="puces" id="puces"></div>
+  </header>
+
+  <div id="zone-tache"></div>
+  <div id="zone-sd"></div>
+
+  <h2>Nouvelle sortie</h2>
+  <div class="bloc">
+    <div class="actions-principales">
+      <button class="btn principal grand" id="b-ouvrir">Choisir un dossier de photos…</button>
+      <button class="lien" id="b-chemin">ou coller un chemin</button>
+    </div>
+    <div class="ligne chemin" id="ligne-chemin">
+      <input class="champ" id="chemin" placeholder="D:\Photos\2026-10-31 Pyrénées">
+      <button class="btn" id="b-chemin-go">Trier ce dossier</button>
+    </div>
+    <div class="note">Le dossier peut contenir les RAW (NEF, CR3, ARW…) et/ou les JPEG, de un ou plusieurs appareils. Tes fichiers ne sont jamais modifiés.</div>
+  </div>
+
+  <h2>Mes sorties</h2>
+  <div id="sorties"></div>
+
+  <footer>
+    <a class="btn" href="/reglages">Réglages</a>
+    <button class="btn" id="b-tel">Trier depuis le téléphone</button>
+    <span style="flex:1"></span>
+    <button class="btn" id="b-quitter">Quitter Tri Photos</button>
+  </footer>
+  <div class="bloc tel" id="tel"></div>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let D = null, attenteSid = null, sdNoms = {}, minuteur = null;
+
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('vu');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('vu'),3000);}
+async function post(url, corps){
+  const r = await fetch(url,{method:'POST',body:JSON.stringify(corps||{})});
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.erreur || 'Erreur');
+  return j;
+}
+const fmtDate = t => new Date(t*1000).toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'long',year:'numeric'});
+
+async function charger(){
+  try{ D = await (await fetch('/api/accueil')).json(); }catch(e){ return planifier(5000); }
+  rendre();
+  planifier(D.tache.etat==='en cours' ? 1000 : 4000);
+}
+function planifier(ms){ clearTimeout(minuteur); minuteur = setTimeout(charger, ms); }
+
+function rendre(){
+  // État
+  const ia = D.ia;
+  let puces = `<span class="puce">v${esc(D.version)}</span>`;
+  if(!ia.verifie) puces += '<span class="puce">IA : vérification…</span>';
+  else if(ia.dispo) puces += `<span class="puce ok">IA active · ${esc(ia.gpu ? ia.nom : 'sur le processeur')}</span>`;
+  else puces += '<span class="puce alerte">IA non installée</span>';
+  $('#puces').innerHTML = puces;
+  if(D.sur_telephone){ $('#b-ouvrir').closest('.bloc').previousElementSibling.style.display='none'; $('#b-ouvrir').closest('.bloc').style.display='none'; $('#b-quitter').style.display='none'; $('#b-tel').style.display='none'; }
+
+  // Tâche
+  const t = D.tache; let h = '';
+  if(t.etat==='en cours' || t.etat==='termine' || t.etat==='erreur'){
+    const pc = t.total ? Math.round(100*t.fait/t.total) : 0;
+    const titre = t.etat==='erreur' ? 'Problème' : t.etat==='termine' ? 'Prêt à trier' : (t.type==='import' ? 'Import de la carte' : 'Analyse en cours');
+    h = `<h2>En cours</h2><div class="bloc tache ${t.etat==='erreur'?'erreur':''}">
+      <h3>${esc(titre)} — ${esc(t.nom||'')}</h3>`;
+    if(t.etat==='en cours'){
+      h += `<div class="note" style="color:var(--txt)">${esc(t.etape)} ${t.total?`· ${t.fait}/${t.total}`:''} ${esc(t.message||'')}</div>
+        <div class="barre ${t.total?'':'indet'}"><i style="width:${pc}%"></i></div>
+        <div class="note">Tu peux laisser tourner : l'analyse continue même si tu fermes cet onglet.</div>`;
+    } else if(t.etat==='termine'){
+      h += `<div class="note" style="color:var(--txt)">${esc(t.message)}</div>
+        <div class="ligne" style="margin-top:10px"><a class="btn principal" href="/s/${t.sid}/">Ouvrir le tri →</a></div>`;
+    } else {
+      h += `<div class="note" style="color:var(--txt)">${esc(t.message)}</div>`;
+    }
+    h += '</div>';
+    if(t.etat==='termine' && attenteSid===t.sid){ attenteSid=null; location.href=`/s/${t.sid}/`; }
+  }
+  $('#zone-tache').innerHTML = h;
+  const occupe = t.etat==='en cours';
+
+  // Cartes SD (on garde ce que l'utilisateur a tapé dans le champ nom)
+  document.querySelectorAll('[data-nom-sd]').forEach(i=>sdNoms[i.dataset.nomSd]=i.value);
+  let sd = '';
+  for(const c of D.cartes){
+    const nom = sdNoms[c.racine] ?? c.nom_propose;
+    sd += `<h2>Carte détectée</h2><div class="bloc sd"><h3>📷 ${esc(c.nom)}</h3>`;
+    if(c.n_nouvelles){
+      sd += `<div class="note" style="color:var(--txt)">${c.n_nouvelles} nouvelle${c.n_nouvelles>1?'s':''} photo${c.n_nouvelles>1?'s':''} (${String(c.taille_go).replace('.',',')} Go)${c.n_photos>c.n_nouvelles?` · ${c.n_photos-c.n_nouvelles} déjà importées`:''}</div>
+        <div class="ligne" style="margin-top:12px"><input class="champ" data-nom-sd="${esc(c.racine)}" value="${esc(nom)}" aria-label="Nom de la sortie">
+        <button class="btn principal" data-importer="${esc(c.racine)}" ${occupe?'disabled':''}>Importer et trier</button></div>
+        <div class="note">Copie dans ${esc(D.dossier_import)}\\${esc(nom)}. Rien n'est effacé de la carte.</div>`;
+    } else sd += `<div class="note">Les ${c.n_photos} photos de la carte ont déjà été importées.</div>`;
+    sd += '</div>';
+  }
+  if(document.activeElement?.dataset?.nomSd === undefined) $('#zone-sd').innerHTML = sd;
+  $('#b-ouvrir').disabled = occupe; $('#b-chemin-go').disabled = occupe;
+
+  // Sorties
+  if(!D.sorties.length){
+    $('#sorties').innerHTML = '<div class="vide">Aucune sortie pour l\'instant. Insère ta carte SD ou choisis un dossier de photos.</div>';
+    return;
+  }
+  $('#sorties').innerHTML = '<div class="sorties">' + D.sorties.map(s=>{
+    if(!s.present) return `<div class="sortie absente"><div class="corps"><h4>${esc(s.nom)}</h4>
+      <div class="date">Dossier introuvable (disque débranché ?)<br>${esc(s.dossier)}</div>
+      <div class="pied"><button class="btn" data-retirer="${s.sid}">Retirer de la liste</button></div></div></div>`;
+    const c = s.compte || {};
+    const couv = s.couverture ? `background-image:url('/s/${s.sid}/mini/${encodeURIComponent(s.couverture)}.jpg')` : '';
+    return `<div class="sortie"><a class="couv" href="/s/${s.sid}/" style="${couv}">${s.exporte?'<span>Exportée</span>':''}</a>
+      <div class="corps"><h4 title="${esc(s.nom)}">${esc(s.nom)}</h4><div class="date">${fmtDate(s.date)} · ${s.n_photos} photos</div>
+      <div class="comptes"><span class="v">★ ${c.meilleure||0}</span><span>✓ ${c.garder||0}</span><span class="r">✕ ${c.supprimer||0}</span></div>
+      <div class="pied"><a class="btn" href="/s/${s.sid}/">Ouvrir</a>
+        <button class="btn" data-dossier="${s.sid}">Dossier</button>
+        <button class="btn" data-reanalyser="${s.sid}" ${occupe?'disabled':''} title="Refaire l'analyse avec les réglages actuels (tes décisions seront réinitialisées)">Réanalyser</button>
+        <button class="btn" data-retirer="${s.sid}" title="Retire de la liste, sans toucher aux photos">Retirer</button></div></div></div>`;
+  }).join('') + '</div>';
+}
+
+async function ouvrir(chemin){
+  try{
+    const r = await post('/api/ouvrir', {chemin});
+    if(r.annule) return;
+    if(r.deja){ location.href = `/s/${r.sid}/`; return; }
+    attenteSid = r.sid; charger();
+  }catch(e){ toast(e.message); }
+}
+$('#b-ouvrir').onclick = () => ouvrir('');
+$('#b-chemin').onclick = () => { $('#ligne-chemin').classList.toggle('vu'); $('#chemin').focus(); };
+$('#b-chemin-go').onclick = () => { const c=$('#chemin').value.trim(); if(c) ouvrir(c); };
+$('#chemin').onkeydown = e => { if(e.key==='Enter') $('#b-chemin-go').click(); };
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button'); if(!b) return;
+  try{
+    if(b.dataset.importer){
+      const nom = document.querySelector(`[data-nom-sd="${CSS.escape(b.dataset.importer)}"]`)?.value || '';
+      const r = await post('/api/importer', {racine:b.dataset.importer, nom}); attenteSid = r.sid; delete sdNoms[b.dataset.importer]; charger();
+    } else if(b.dataset.reanalyser){
+      if(!confirm('Refaire l\'analyse avec les réglages actuels ? Tes décisions sur cette sortie seront réinitialisées.')) return;
+      const r = await post('/api/reanalyser', {sid:b.dataset.reanalyser}); attenteSid = r.sid; charger();
+    } else if(b.dataset.retirer){
+      if(!confirm('Retirer cette sortie de la liste ? Les photos ne sont pas touchées.')) return;
+      await post('/api/retirer', {sid:b.dataset.retirer}); charger();
+    } else if(b.dataset.dossier){
+      await post('/api/ouvrir_dossier_sortie', {sid:b.dataset.dossier});
+    }
+  }catch(err){ toast(err.message); }
+});
+
+$('#b-tel').onclick = async () => {
+  try{
+    const r = await post('/api/telephone');
+    const el = $('#tel'); el.classList.add('vu');
+    el.innerHTML = r.urls.length
+      ? `<b>Sur ton téléphone</b>, connecté au même Wi-Fi (ou au partage de connexion de ce PC), ouvre :${r.urls.map(u=>`<code>${esc(u)}</code>`).join('')}
+         <div class="note">Si Windows demande l'autorisation du pare-feu, accepte pour les réseaux privés. Le lien contient une clé : ne le partage pas.</div>`
+      : '<b>Aucun réseau détecté.</b> Connecte ce PC au Wi-Fi ou au partage de connexion du téléphone, puis réessaie.';
+    el.scrollIntoView({behavior:'smooth'});
+  }catch(e){ toast(e.message); }
+};
+$('#b-quitter').onclick = async () => {
+  if(D?.tache?.etat==='en cours' && !confirm('Une tâche est en cours. Quitter quand même ?')) return;
+  await post('/api/quitter').catch(()=>{});
+  clearTimeout(minuteur);
+  document.body.innerHTML = '<main><h1>Tri Photos est fermé</h1><p class="sous">Tes décisions sont enregistrées. Relance l\'appli avec l\'icône du bureau.</p></main>';
+};
+charger();
+</script>
+</body>
+</html>

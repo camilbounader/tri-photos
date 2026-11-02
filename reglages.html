@@ -1,0 +1,101 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Réglages · Tri Photos</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--fond:#111110;--carte:#1a1a18;--txt:#f1efe9;--doux:#a19e94;--ligne:#33322e;--accent:#3fae6a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--fond);color:var(--txt);font:15px/1.45 system-ui,sans-serif}
+main{max-width:760px;margin:auto;padding:24px 16px 120px}
+h1{font-size:24px;margin:0 0 4px} .info{color:var(--doux);margin:0 0 20px}
+h2{font-size:16px;margin:26px 0 8px;text-transform:uppercase;letter-spacing:.06em;color:var(--doux)}
+.r{background:var(--carte);border:1px solid var(--ligne);border-radius:10px;padding:12px 14px;margin:8px 0}
+.t{display:flex;justify-content:space-between;gap:12px;font-weight:600}
+.v{font-variant-numeric:tabular-nums;color:var(--accent)}
+.champ{font:inherit;color:var(--txt);background:var(--fond);border:1px solid var(--ligne);border-radius:8px;padding:8px 10px}
+.e{color:var(--doux);font-size:13px;margin:2px 0 6px} .d{font-size:12px;color:var(--doux)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+label.f{display:flex;gap:10px;align-items:center;padding:4px 0}
+footer{position:fixed;left:0;right:0;bottom:0;background:var(--carte);border-top:1px solid var(--ligne);padding:12px 16px}
+footer div{max-width:760px;margin:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button,.bouton{font:inherit;text-decoration:none;padding:8px 14px;border-radius:8px;border:1px solid var(--ligne);background:var(--fond);color:var(--txt);cursor:pointer}
+button.p{background:var(--accent);border-color:var(--accent);color:#fff}
+#msg{color:var(--doux);font-size:13px;flex:1;min-width:160px}
+</style></head><body><main>
+<p style="margin:0 0 6px"><a href="/" style="color:var(--doux)">← Tri Photos</a></p><h1>Réglages</h1><p class="info" id="info"></p><div id="form"></div></main>
+<footer><div><span id="msg"></span>
+<button id="def">Valeurs par défaut</button><a class="bouton" href="/">← Retour</a>
+<button class="p" id="save">Enregistrer</button></div></footer>
+<script>
+let S;
+const fr=v=>Number(v).toLocaleString('fr-FR',{maximumFractionDigits:3});
+function rendre(){
+  const form=document.getElementById('form'); form.innerHTML='';
+  document.getElementById('info').textContent = S.infos.modifie_le
+    ? `Derniers changements le ${S.infos.modifie_le} sur ${S.infos.modifie_par}. S'appliquent à la prochaine analyse (bouton « Réanalyser » sur une sortie déjà triée).`
+    : "Réglages par défaut, jamais modifiés. Ils s'appliquent à la prochaine analyse.";
+  let groupe='';
+  for(const [k,[def,lib,exp,mn,mx,pas,g]] of Object.entries(S.schema)){
+    if(g!==groupe){groupe=g;const h=document.createElement('h2');h.textContent=g;form.appendChild(h);}
+    const r=document.createElement('div');r.className='r';
+    r.innerHTML=`<div class="t"><span></span><span class="v"></span></div><div class="e"></div>
+      <input type="range" min="${mn}" max="${mx}" step="${pas}"><div class="d"></div>`;
+    r.querySelector('.t span').textContent=lib; r.querySelector('.e').textContent=exp;
+    r.querySelector('.d').textContent='Par défaut : '+fr(def);
+    const inp=r.querySelector('input'), v=r.querySelector('.v');
+    inp.value=S.valeurs[k]; v.textContent=fr(inp.value);
+    inp.oninput=()=>{S.valeurs[k]=Number(inp.value);v.textContent=fr(inp.value);msg('Modifications non enregistrées');};
+    form.appendChild(r);
+  }
+  for(const [k,[def,lib,exp,opts]] of Object.entries(S.choix)){
+    const h2=document.createElement('h2');h2.textContent=lib;form.appendChild(h2);
+    const r2=document.createElement('div');r2.className='r';
+    const e2=document.createElement('div');e2.className='e';e2.textContent=exp;r2.appendChild(e2);
+    for(const [val,txt] of Object.entries(opts)){
+      const l=document.createElement('label');l.className='f';
+      const c=document.createElement('input');c.type='radio';c.name=k;c.checked=S.valeurs[k]===val;
+      c.onchange=()=>{S.valeurs[k]=val;msg('Modifications non enregistrées');};
+      l.appendChild(c);l.append(txt);r2.appendChild(l);
+    }
+    form.appendChild(r2);
+  }
+  const h=document.createElement('h2');h.textContent='Formats exportés';form.appendChild(h);
+  const r=document.createElement('div');r.className='r';
+  for(const [nom,[w,hh,lib]] of Object.entries(S.formats)){
+    const l=document.createElement('label');l.className='f';
+    const c=document.createElement('input');c.type='checkbox';c.checked=S.valeurs.formats_actifs.includes(nom);
+    c.onchange=()=>{const a=new Set(S.valeurs.formats_actifs);c.checked?a.add(nom):a.delete(nom);
+      S.valeurs.formats_actifs=[...a];msg('Modifications non enregistrées');};
+    l.appendChild(c);l.append(lib);r.appendChild(l);
+  }
+  form.appendChild(r);
+  rendreLocale();
+}
+function rendreLocale(){
+  const L=S.locale, form=document.getElementById('form');
+  const h=document.createElement('h2');h.textContent='Sur ce PC';form.appendChild(h);
+  for(const [k,lib,exp] of [
+    ['dossier_import','Dossier où ranger les imports de la carte SD','Chaque sortie importée y crée un sous-dossier.'],
+    ['dossier_partage','Dossier de partage des réglages (optionnel)',"Choisis un dossier Google Drive partagé avec ton pote (installé sur vos deux PC) : vous aurez exactement les mêmes réglages. Laisse vide pour garder les réglages sur ce PC."]]){
+    const r=document.createElement('div');r.className='r';
+    r.innerHTML=`<div class="t"><span></span></div><div class="e"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><input class="champ" style="flex:1;min-width:200px"><button>Choisir…</button>${k==='dossier_partage'?'<button data-vider>Vider</button>':''}</div>`;
+    r.querySelector('.t span').textContent=lib; r.querySelector('.e').textContent=exp;
+    const inp=r.querySelector('input'); inp.value=L[k]||'';
+    const sauver=async v=>{const res=await fetch('/api/config_locale',{method:'POST',body:JSON.stringify({[k]:v})});
+      const j=await res.json(); if(res.ok){inp.value=v;msg('Enregistré ✓');if(k==='dossier_partage')charger();} else msg('Erreur : '+j.erreur);};
+    inp.onchange=()=>sauver(inp.value.trim());
+    r.querySelector('button:not([data-vider])').onclick=async()=>{const j=await (await fetch('/api/choisir_dossier',{method:'POST',body:JSON.stringify({titre:lib})})).json(); if(j.chemin) sauver(j.chemin);};
+    const v=r.querySelector('[data-vider]'); if(v) v.onclick=()=>sauver('');
+    form.appendChild(r);
+  }
+  const f=document.createElement('div');f.className='d';f.style.marginTop='6px';f.textContent='Fichier des réglages : '+S.infos.fichier;form.appendChild(f);
+}
+function msg(t){document.getElementById('msg').textContent=t;}
+async function charger(){S=await (await fetch('/api/reglages')).json();rendre();}
+document.getElementById('save').onclick=async()=>{
+  const res=await fetch('/api/reglages',{method:'POST',body:JSON.stringify(S.valeurs)});
+  if(res.ok){await charger();msg('Enregistré ✓');}else msg('Erreur : '+await res.text());};
+document.getElementById('def').onclick=()=>{S.valeurs=JSON.parse(JSON.stringify(S.defauts));rendre();
+  msg('Valeurs par défaut affichées — clique sur Enregistrer pour les garder');};
+charger();
+</script></body></html>

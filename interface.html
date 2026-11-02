@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tri Photos</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --fond:#111110;--fond2:#1a1a18;--carte:#22211f;--ligne:#33322e;--txt:#f1efe9;--doux:#a19e94;--faible:#6f6c64;
+  --vert:#3fae6a;--vert-f:#173a26;--rouge:#e0573f;--rouge-f:#3d1a14;--ambre:#e2a93b;--ambre-f:#3a2c10;--bleu:#6aa3e8;
+  --rayon:12px;--hauteur:220px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--fond);color:var(--txt);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+.btn{text-decoration:none;display:inline-block;background:var(--carte);border:1px solid var(--ligne);border-radius:999px;padding:7px 14px;white-space:nowrap}
+.btn:hover{border-color:var(--doux)} .btn.on{background:var(--txt);color:var(--fond);border-color:var(--txt)}
+.btn.principal{background:var(--vert);border-color:var(--vert);color:#fff;font-weight:600}
+.btn.danger{border-color:var(--rouge);color:var(--rouge)}
+.n{opacity:.7;font-variant-numeric:tabular-nums;margin-left:4px}
+
+/* En-tête */
+header{padding:22px clamp(16px,3vw,40px) 10px;display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end;justify-content:space-between}
+h1{margin:0;font-size:clamp(22px,3vw,30px);letter-spacing:-.01em}
+.sous{color:var(--doux);margin-top:4px;font-size:14px}
+.compteurs{display:flex;gap:8px;flex-wrap:wrap}
+.compteur{background:var(--fond2);border:1px solid var(--ligne);border-radius:10px;padding:8px 12px;min-width:92px}
+.compteur b{display:block;font-size:22px;font-variant-numeric:tabular-nums;line-height:1.1}
+.compteur span{font-size:12px;color:var(--doux)}
+.compteur.v b{color:var(--vert)} .compteur.r b{color:var(--rouge)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* Barre d'outils */
+nav{position:sticky;top:0;z-index:20;background:rgba(17,17,16,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--ligne);
+  padding:10px clamp(16px,3vw,40px);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+nav .sep{flex:1}
+nav label{display:flex;align-items:center;gap:8px;color:var(--doux);font-size:14px}
+nav input[type=range]{width:110px;accent-color:var(--txt)}
+
+/* Moments */
+main{padding:0 clamp(16px,3vw,40px) 80px}
+.moment{margin-top:34px}
+.titre-moment{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--ligne)}
+.titre-moment h2{margin:0;font-size:clamp(20px,2.4vw,26px);letter-spacing:-.01em}
+.titre-moment .quand{color:var(--doux);font-size:15px}
+.titre-moment .info{color:var(--faible);font-size:13px}
+.vide{color:var(--doux);padding:60px 0;text-align:center}
+
+/* Grille justifiée */
+.grille{display:flex;flex-wrap:wrap;gap:8px}
+.grille::after{content:"";flex-grow:999999}
+.photo{position:relative;border-radius:8px;overflow:hidden;background:var(--fond2);cursor:pointer;outline:3px solid transparent;outline-offset:-3px}
+.photo i{display:block}
+.photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .25s,opacity .2s}
+.photo:hover img{transform:scale(1.02)}
+.photo.d-meilleure{outline-color:var(--vert)}
+.photo.d-supprimer{outline-color:var(--rouge)}
+.photo.d-supprimer img{opacity:.38}
+.photo .etat{position:absolute;top:8px;left:8px;display:flex;gap:5px;flex-wrap:wrap;pointer-events:none}
+.pastille{font-size:12px;font-weight:600;padding:3px 8px;border-radius:999px;background:rgba(0,0,0,.65);color:#fff;backdrop-filter:blur(4px)}
+.pastille.v{background:var(--vert)} .pastille.r{background:var(--rouge)} .pastille.a{background:rgba(226,169,59,.92);color:#1b1407}
+.photo .serie{position:absolute;right:8px;bottom:8px;font-size:12px;font-weight:600;padding:4px 9px;border-radius:999px;background:rgba(0,0,0,.72);color:#fff;border:1px solid rgba(255,255,255,.25)}
+.photo .serie:hover{background:#000}
+.photo .rapide{position:absolute;right:8px;top:8px;display:flex;gap:4px;opacity:0;transition:opacity .15s}
+.photo:hover .rapide{opacity:1}
+.rapide button{width:32px;height:32px;border-radius:50%;border:0;background:rgba(0,0,0,.7);color:#fff;font-size:15px}
+.rapide button:hover{background:#000}
+.photo.membre{box-shadow:0 0 0 2px var(--bleu) inset}
+@media (hover:none){.photo .rapide{display:none}}
+@media (max-width:600px){
+  :root{--hauteur:100px}
+  nav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding:8px 16px}
+  nav::-webkit-scrollbar{display:none}
+  nav .sep,nav label.taille{display:none}
+  header{padding-top:16px} .compteur{min-width:0;flex:1} .compteurs{width:100%}
+  .grille{gap:5px} .pastille{font-size:11px;padding:2px 6px}
+}
+
+/* Diaporama */
+#diapo{position:fixed;inset:0;z-index:50;background:#000;display:none;grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:auto minmax(0,1fr)}
+#diapo.ouvert{display:grid}
+.d-haut{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:10px 14px;background:#0b0b0a;border-bottom:1px solid #222}
+.d-haut .nom{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0} .d-haut .pos{color:var(--doux);font-variant-numeric:tabular-nums;white-space:nowrap}
+.d-haut .sep{flex:1}
+.scene{position:relative;overflow:hidden;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;touch-action:pan-y}
+.scene img{max-width:100%;max-height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none}
+.scene.zoom{overflow:auto;display:block;cursor:zoom-out}
+.scene.zoom img{max-width:none;max-height:none}
+.scene .chargement{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-size:13px;color:var(--doux);background:rgba(0,0,0,.6);padding:4px 10px;border-radius:999px}
+.fleche{position:absolute;top:50%;transform:translateY(-50%);width:52px;height:52px;border-radius:50%;border:0;background:rgba(0,0,0,.45);color:#fff;font-size:26px;z-index:2}
+.fleche:hover{background:rgba(0,0,0,.8)} .fleche.g{left:14px} .fleche.d{right:14px}
+.badge-retouche{position:absolute;top:14px;left:14px;background:var(--ambre);color:#1b1407;font-weight:700;font-size:12px;padding:4px 10px;border-radius:999px;display:none;z-index:2}
+.panneau{background:var(--fond2);border-left:1px solid #222;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.bandeau{border-radius:var(--rayon);padding:12px 14px;border:1px solid}
+.bandeau h3{margin:0 0 6px;font-size:15px}
+.bandeau ul{margin:0;padding-left:18px;color:var(--txt);font-size:14px}
+.bandeau.v{background:var(--vert-f);border-color:var(--vert)} .bandeau.v h3{color:#7fd8a1}
+.bandeau.r{background:var(--rouge-f);border-color:var(--rouge)} .bandeau.r h3{color:#ff9a86}
+.bandeau.a{background:var(--ambre-f);border-color:var(--ambre)} .bandeau.a h3{color:#f3c86e}
+.bandeau.n{background:var(--carte);border-color:var(--ligne)} .bandeau.n h3{color:var(--doux)}
+.lien{color:var(--bleu);background:none;border:0;padding:0;text-decoration:underline}
+.decisions{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.decisions button{border:1px solid var(--ligne);background:var(--carte);border-radius:10px;padding:10px 4px;font-size:13px;line-height:1.2}
+.decisions button b{display:block;font-size:18px;margin-bottom:2px}
+.decisions button kbd{display:block;font-size:11px;color:var(--faible);margin-top:3px;font-family:inherit}
+.decisions .on.meilleure{background:var(--vert);border-color:var(--vert);color:#fff}
+.decisions .on.garder{background:var(--txt);border-color:var(--txt);color:var(--fond)}
+.decisions .on.supprimer{background:var(--rouge);border-color:var(--rouge);color:#fff}
+.decisions .on kbd{color:inherit;opacity:.75}
+dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:14px}
+dt{color:var(--doux)} dd{margin:0;font-variant-numeric:tabular-nums}
+.raccourcis{font-size:12px;color:var(--faible);line-height:1.7}
+kbd.k{border:1px solid var(--ligne);border-radius:4px;padding:0 5px;font-family:inherit;color:var(--doux)}
+@media (max-width:860px){
+  #diapo{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto}
+  #d-zoom{display:none} .d-haut{gap:8px;padding:8px 10px} .d-haut .btn{padding:6px 11px}
+  .panneau{border-left:0;border-top:1px solid #222;max-height:42vh;padding:12px}
+  .fleche{display:none} .raccourcis{display:none}
+}
+
+/* Fenêtre d'export */
+.voile{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:60;display:none;align-items:center;justify-content:center;padding:16px}
+.voile.ouvert{display:flex}
+.fenetre{background:var(--fond2);border:1px solid var(--ligne);border-radius:16px;max-width:560px;width:100%;padding:22px;max-height:90vh;overflow:auto}
+.fenetre h2{margin:0 0 12px}
+.fenetre p{color:var(--doux);margin:8px 0}
+.ligne-export{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--ligne)}
+.barre{height:8px;background:var(--carte);border-radius:99px;overflow:hidden;margin:14px 0 6px}
+.barre i{display:block;height:100%;width:0;background:var(--vert);transition:width .3s}
+.fenetre .actions{margin-top:16px;justify-content:flex-end}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--txt);color:var(--fond);padding:9px 16px;border-radius:999px;font-weight:600;z-index:80;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.vu{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 id="titre">Tri Photos</h1>
+    <div class="sous" id="sous"></div>
+  </div>
+  <div class="compteurs">
+    <div class="compteur v"><b id="c-meilleure">0</b><span>★ meilleures</span></div>
+    <div class="compteur"><b id="c-garder">0</b><span>à garder</span></div>
+    <div class="compteur r"><b id="c-supprimer">0</b><span>à supprimer</span></div>
+  </div>
+  <div class="actions">
+    <button class="btn principal" id="b-export">Exporter…</button>
+    <a class="btn" href="/" id="b-accueil">← Accueil</a>
+  </div>
+</header>
+
+<nav>
+  <button class="btn on" data-filtre="tout">Tout<span class="n" id="f-tout"></span></button>
+  <button class="btn" data-filtre="meilleure">★ Meilleures<span class="n" id="f-meilleure"></span></button>
+  <button class="btn" data-filtre="garder">À garder<span class="n" id="f-garder"></span></button>
+  <button class="btn" data-filtre="supprimer">À supprimer<span class="n" id="f-supprimer"></span></button>
+  <button class="btn" data-filtre="doublon">Doublons<span class="n" id="f-doublon"></span></button>
+  <span class="sep"></span>
+  <label><input type="checkbox" id="replier" checked> Une seule photo par série</label>
+  <label class="taille">Taille <input type="range" id="taille" min="120" max="420" step="10" value="220"></label>
+  <button class="btn" id="b-plus">Actions ▾</button>
+</nav>
+
+<main id="contenu"></main>
+
+<!-- Diaporama -->
+<div id="diapo" aria-modal="true" role="dialog">
+  <div class="d-haut">
+    <button class="btn" id="d-fermer">✕ Fermer</button>
+    <span class="nom" id="d-nom"></span><span class="pos" id="d-pos"></span>
+    <span class="sep"></span>
+    <button class="btn" id="d-retouche" title="Comparer avec la retouche automatique (R)">Retouche auto</button>
+    <button class="btn" id="d-zoom" title="Taille réelle (Z ou double-clic)">Zoom 100 %</button>
+  </div>
+  <div class="scene" id="scene">
+    <span class="badge-retouche" id="d-badge">Retouche automatique</span>
+    <button class="fleche g" id="d-prec" aria-label="Précédente">‹</button>
+    <img id="d-img" alt="">
+    <button class="fleche d" id="d-suiv" aria-label="Suivante">›</button>
+    <span class="chargement" id="d-charge" hidden>Chargement en pleine qualité…</span>
+  </div>
+  <aside class="panneau" id="panneau"></aside>
+</div>
+
+<!-- Export -->
+<div class="voile" id="v-export"><div class="fenetre" id="f-export"></div></div>
+<!-- Actions groupées -->
+<div class="voile" id="v-plus"><div class="fenetre">
+  <h2>Actions groupées</h2>
+  <p>Pour aller plus vite sur une grosse sortie.</p>
+  <div class="actions" style="flex-direction:column;align-items:stretch">
+    <button class="btn" id="a-doublons">Marquer tous les doublons « à supprimer »</button>
+    <button class="btn" id="a-suggestions">Revenir aux suggestions de l'outil</button>
+    <button class="btn" id="a-dossier">Ouvrir le dossier _TRI</button>
+    <button class="btn" id="a-fermer">Fermer</button>
+  </div>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const B = location.pathname.replace(/\/+$/,'');
+let A, D, PH = {}, filtre = 'tout', replie = true, liste = [], idx = -1, retouche = false, seriesOuvertes = new Set();
+const NOMS = {meilleure:'★ Meilleure', garder:'À garder', supprimer:'À supprimer'};
+const jours = ['dim.','lun.','mar.','mer.','jeu.','ven.','sam.'];
+const fmtH = t => new Date(t*1000).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+const fmtJ = t => {const d=new Date(t*1000);return `${jours[d.getDay()]} ${d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})}`};
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('vu');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('vu'),1600);}
+
+async function charger(){
+  const r = await (await fetch(B+'/donnees')).json();
+  A = r.analyse; D = r.decisions; A.photos.forEach(p => PH[p.id] = p);
+  A._envoi = r.envoi; A._deplacees = r.deplacees;
+  $('#titre').textContent = A.nom;
+  const ia = {aucune:'sans IA (critères techniques)', clip:'IA : variété', 'clip+esthetique':'IA : note esthétique + variété'}[A.mode_ia];
+  const reg = r.reglages_infos.modifie_le ? `réglages du ${r.reglages_infos.modifie_le}` : 'réglages par défaut';
+  $('#sous').textContent = `${A.photos.length} photos · ${A.moments.length} moments · ${A.series.length} séries · ${ia} · ${reg}`;
+  rendre();
+}
+
+function decisionParDefaut(p){return p.suggestion==='meilleure'?'meilleure':p.suggestion==='rejet'?'supprimer':'garder';}
+
+function passeFiltre(p){
+  if(filtre==='tout') return true;
+  if(filtre==='doublon') return p.suggestion==='doublon';
+  return D[p.id]===filtre;
+}
+
+function compter(){
+  const c={meilleure:0,garder:0,supprimer:0};
+  A.photos.forEach(p=>c[D[p.id]]++);
+  for(const k in c){$('#c-'+k).textContent=c[k];$('#f-'+k).textContent=c[k];}
+  $('#f-tout').textContent=A.photos.length;
+  $('#f-doublon').textContent=A.photos.filter(p=>p.suggestion==='doublon').length;
+}
+
+function carte(p, serieN, estMembre){
+  const r = p.largeur/p.hauteur, h = `var(--hauteur)`;
+  const d = D[p.id];
+  let past = '';
+  if(d==='meilleure') past += '<span class="pastille v">★ Meilleure</span>';
+  if(d==='supprimer') past += `<span class="pastille r">✕ ${esc(p.rejets?.[0] || 'À supprimer')}</span>`;
+  if(d!=='supprimer' && p.suggestion==='rejet') past += `<span class="pastille r">${esc(p.rejets[0])}</span>`;
+  if(p.suggestion==='doublon' && d!=='supprimer') past += '<span class="pastille a">Doublon</span>';
+  else if(p.proche_de && p.suggestion==='garder' && d==='garder') past += '<span class="pastille">Proche d\'une ★</span>';
+  if(p.badges?.some(b=>b.includes('rattrapable'))) past += '<span class="pastille">Rattrapable</span>';
+  const serie = serieN>1 ? `<button class="serie" data-serie="${p.serie}">${seriesOuvertes.has(p.serie)?'Replier':'+'+(serieN-1)+' similaires'}</button>` : '';
+  return `<div class="photo d-${d}${estMembre?' membre':''}" data-id="${esc(p.id)}" style="flex:${r} 1 calc(${r} * ${h});">
+    <i style="padding-bottom:${(100/r).toFixed(3)}%"></i>
+    <img loading="lazy" src="${B}/mini/${encodeURIComponent(p.id)}.jpg" alt="">
+    <div class="etat">${past}</div>
+    <div class="rapide">
+      <button data-act="meilleure" title="Meilleure (S)">★</button>
+      <button data-act="garder" title="Garder (G)">✓</button>
+      <button data-act="supprimer" title="Supprimer (X)">✕</button>
+    </div>${serie}</div>`;
+}
+
+function rendre(){
+  compter();
+  liste = [];
+  const parSerie = {};
+  A.series.forEach((s,i)=>parSerie[i]=s);
+  let html = '';
+  A.moments.forEach((ids, m) => {
+    const ph = ids.map(i=>PH[i]);
+    let cartes = '';
+    const vues = new Set();
+    for(const p of ph){
+      const s = parSerie[p.serie];
+      const tete = s.map(i=>PH[i]).find(x=>x.meilleure_serie) || PH[s[0]];
+      const ouverte = seriesOuvertes.has(p.serie);
+      if(replie && filtre==='tout' && !ouverte && s.length>1){
+        // une seule vignette par série : la meilleure (ou la première si toute la série est rejetée)
+        if(p.id!==tete.id || vues.has(p.serie)) continue;
+        vues.add(p.serie);
+        cartes += carte(p, s.length, false); liste.push(p.id);
+        continue;
+      }
+      if(!passeFiltre(p)) continue;
+      cartes += carte(p, (p.id===tete.id)?s.length:0, ouverte && s.length>1);
+      liste.push(p.id);
+    }
+    if(!cartes) return;
+    const nM = ph.filter(p=>D[p.id]==='meilleure').length;
+    html += `<section class="moment"><div class="titre-moment"><h2>Moment ${m+1}</h2>
+      <span class="quand">${fmtJ(ph[0].date)} · ${fmtH(ph[0].date)} → ${fmtH(ph[ph.length-1].date)}</span>
+      <span class="info">${ph.length} photos · ${nM} ★</span></div><div class="grille">${cartes}</div></section>`;
+  });
+  $('#contenu').innerHTML = html || '<div class="vide">Aucune photo dans ce filtre.</div>';
+}
+
+async function decider(ids, statut, silencieux){
+  ids = [].concat(ids);
+  ids.forEach(i=>D[i]=statut);
+  await fetch(B+'/decision',{method:'POST',body:JSON.stringify({ids, statut})});
+  if(!silencieux) toast(`${ids.length>1?ids.length+' photos':'Photo'} → ${NOMS[statut]}`);
+}
+
+/* --- Grille --- */
+$('#contenu').addEventListener('click', async e => {
+  const s = e.target.closest('.serie');
+  if(s){e.stopPropagation();const n=+s.dataset.serie;seriesOuvertes.has(n)?seriesOuvertes.delete(n):seriesOuvertes.add(n);rendre();return;}
+  const b = e.target.closest('.rapide button'), c = e.target.closest('.photo');
+  if(!c) return;
+  if(b){e.stopPropagation();await decider(c.dataset.id,b.dataset.act);rendre();return;}
+  ouvrir(liste.indexOf(c.dataset.id));
+});
+document.querySelectorAll('[data-filtre]').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('[data-filtre]').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  filtre=b.dataset.filtre;rendre();window.scrollTo({top:0});
+});
+$('#replier').onchange=e=>{replie=e.target.checked;seriesOuvertes.clear();rendre();};
+$('#taille').oninput=e=>document.documentElement.style.setProperty('--hauteur',e.target.value+'px');
+try{const t=localStorage.getItem('tri-taille');if(t){$('#taille').value=t;document.documentElement.style.setProperty('--hauteur',t+'px');}}catch(e){}
+$('#taille').onchange=e=>{try{localStorage.setItem('tri-taille',e.target.value)}catch(_){}};
+
+/* --- Diaporama --- */
+const img = $('#d-img'), scene = $('#scene');
+function src(id){return `${B}/${retouche?'retouche':'original'}/${encodeURIComponent(id)}.jpg`;}
+function ouvrir(i){if(i<0)return;idx=i;$('#diapo').classList.add('ouvert');document.body.style.overflow='hidden';afficher();}
+function fermer(){$('#diapo').classList.remove('ouvert');document.body.style.overflow='';scene.classList.remove('zoom');rendre();
+  const c=document.querySelector(`.photo[data-id="${CSS.escape(liste[idx]||'')}"]`);if(c)c.scrollIntoView({block:'center'});}
+function afficher(){
+  const p = PH[liste[idx]];
+  $('#d-nom').textContent = p.id;
+  $('#d-pos').textContent = `${idx+1} / ${liste.length}`;
+  $('#d-retouche').classList.toggle('on', retouche);
+  $('#d-badge').style.display = retouche ? 'block' : 'none';
+  // vignette tout de suite, puis pleine qualité
+  img.src = `${B}/mini/${encodeURIComponent(p.id)}.jpg`;
+  $('#d-charge').hidden = false;
+  const plein = new Image();
+  plein.onload = () => { if(liste[idx]===p.id){ img.src = plein.src; $('#d-charge').hidden = true; } };
+  plein.onerror = () => { $('#d-charge').textContent = 'Impossible de charger la pleine qualité'; };
+  plein.src = src(p.id);
+  [idx+1, idx-1, idx+2].forEach(j=>{ if(j>=0 && j<liste.length){ const im=new Image(); im.src=src(liste[j]); }});
+  panneau(p);
+}
+function panneau(p){
+  const d = D[p.id];
+  let b = '';
+  if(p.suggestion==='meilleure') b += `<div class="bandeau v"><h3>★ Suggérée comme meilleure</h3><ul>${p.raisons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>`;
+  else if(p.suggestion==='rejet') b += `<div class="bandeau r"><h3>✕ Suppression suggérée</h3><ul>${p.explications_rejet.map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>`;
+  else if(p.suggestion==='doublon') b += `<div class="bandeau a"><h3>Doublon</h3><ul>${p.raisons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>
+      ${p.proche_de?`<p style="margin:8px 0 0"><button class="lien" data-aller="${esc(p.proche_de)}">Voir ${esc(p.proche_de)}</button></p>`:''}</div>`;
+  else b += `<div class="bandeau n"><h3>Photo correcte, non retenue dans les meilleures</h3>${p.raisons.length?`<ul>${p.raisons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`:''}
+      ${p.proche_de?`<p style="margin:8px 0 0"><button class="lien" data-aller="${esc(p.proche_de)}">Voir ${esc(p.proche_de)}</button></p>`:''}</div>`;
+  if(p.badges?.length) b += `<div class="bandeau n"><h3>À savoir</h3><ul>${p.badges.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
+  const tech = [p.vitesse && (p.vitesse+' s'), p.ouverture, p.iso && ('ISO '+p.iso), p.focale].filter(Boolean).join(' · ');
+  $('#panneau').innerHTML = `
+    <div class="decisions">
+      ${['meilleure','garder','supprimer'].map((s,k)=>`<button class="${s}${d===s?' on':''}" data-dec="${s}"><b>${['★','✓','✕'][k]}</b>${['Meilleure','Garder','Supprimer'][k]}<kbd>${['S','G','X'][k]}</kbd></button>`).join('')}
+    </div>
+    ${b}
+    <dl>
+      <dt>Prise</dt><dd>${fmtJ(p.date)} à ${new Date(p.date*1000).toLocaleTimeString('fr-FR')}</dd>
+      <dt>Moment</dt><dd>${p.moment+1} · série ${p.serie+1} (${A.series[p.serie].length} photo${A.series[p.serie].length>1?'s':''})</dd>
+      <dt>Note</dt><dd>${p.note<0?'—':Math.round(p.note)+' / 100'}${p.note_esthetique!=null?` · IA ${p.note_esthetique.toFixed(1)}/10`:''}</dd>
+      <dt>Netteté</dt><dd>${Math.round(p.nettete)} (seuil ${Math.round(A.seuil_flou)})</dd>
+      ${p.modele?`<dt>Appareil</dt><dd>${esc(p.modele)}</dd>`:''}
+      ${tech?`<dt>Réglages</dt><dd>${esc(tech)}</dd>`:''}
+      <dt>Fichiers</dt><dd>${[p.raw,p.jpg].filter(Boolean).map(f=>esc(f.split(/[\\/]/).pop())).join(' + ')}</dd>
+    </dl>
+    <div class="raccourcis"><kbd class="k">←</kbd> <kbd class="k">→</kbd> naviguer · <kbd class="k">S</kbd> <kbd class="k">G</kbd> <kbd class="k">X</kbd> décider (passe à la suivante)<br>
+      <kbd class="k">R</kbd> retouche auto · <kbd class="k">Z</kbd> zoom 100 % · <kbd class="k">Échap</kbd> fermer</div>`;
+}
+function bouger(n){ if(!liste.length) return; idx = (idx + n + liste.length) % liste.length; scene.classList.remove('zoom'); afficher(); }
+async function deciderDiapo(statut, avancer){
+  await decider(liste[idx], statut, true);
+  toast(NOMS[statut]);
+  if(avancer && idx < liste.length-1) bouger(1); else panneau(PH[liste[idx]]);
+  compter();
+}
+$('#panneau').addEventListener('click', e=>{
+  const b=e.target.closest('[data-dec]'); if(b) return deciderDiapo(b.dataset.dec, false);
+  const a=e.target.closest('[data-aller]');
+  if(a){ let j=liste.indexOf(a.dataset.aller);
+    if(j<0){ liste.splice(idx+1,0,a.dataset.aller); j=idx+1; } idx=j; afficher(); }
+});
+$('#d-prec').onclick=()=>bouger(-1); $('#d-suiv').onclick=()=>bouger(1); $('#d-fermer').onclick=fermer;
+$('#d-retouche').onclick=()=>{retouche=!retouche;afficher();};
+function zoom(){scene.classList.toggle('zoom');}
+$('#d-zoom').onclick=zoom; img.ondblclick=zoom;
+document.addEventListener('keydown', e=>{
+  if(!$('#diapo').classList.contains('ouvert')) return;
+  const k=e.key.toLowerCase();
+  if(k==='arrowright'||k===' '){e.preventDefault();bouger(1);}
+  else if(k==='arrowleft'){e.preventDefault();bouger(-1);}
+  else if(k==='escape'){ if(scene.classList.contains('zoom')) zoom(); else fermer(); }
+  else if(k==='s') deciderDiapo('meilleure',true);
+  else if(k==='g') deciderDiapo('garder',true);
+  else if(k==='x'||k==='delete') deciderDiapo('supprimer',true);
+  else if(k==='r'){retouche=!retouche;afficher();}
+  else if(k==='z') zoom();
+});
+// Glisser du doigt (téléphone)
+let x0=null;
+scene.addEventListener('touchstart',e=>{x0=e.touches[0].clientX},{passive:true});
+scene.addEventListener('touchend',e=>{ if(x0===null||scene.classList.contains('zoom')) return;
+  const dx=e.changedTouches[0].clientX-x0; if(Math.abs(dx)>50) bouger(dx<0?1:-1); x0=null; });
+
+/* --- Export --- */
+let suivi=null;
+function fenetreExport(etat){
+  const c={meilleure:0,garder:0,supprimer:0}; A.photos.forEach(p=>c[D[p.id]]++);
+  const envoi={originaux:'les originaux tels quels',jpeg_appareil:"les JPEG de l'appareil quand ils existent",retouchees:'les versions retouchées'}[A._envoi];
+  let corps = `<h2>Exporter la sortie</h2>
+    <div class="ligne-export"><span>★ Meilleures : RAW original + JPEG retouché + formats</span><b>${c.meilleure}</b></div>
+    <div class="ligne-export"><span>Dossier prêt pour Google Photos (meilleures + à garder)</span><b>${c.meilleure+c.garder}</b></div>
+    <div class="ligne-export"><span>À supprimer (listées, non envoyées)</span><b>${c.supprimer}</b></div>
+    <p>Le dossier pour Google Photos contiendra ${envoi} (modifiable dans « 3 - Reglages »). Tu n'auras plus qu'à le glisser sur photos.google.com.</p>`;
+  if(etat && etat.etat==='en cours'){
+    const pc = etat.total ? Math.round(100*etat.fait/etat.total) : 0;
+    corps += `<div class="barre"><i style="width:${pc}%"></i></div><p>${esc(etat.message)} ${etat.fait}/${etat.total}</p>`;
+  } else if(etat && etat.etat==='termine'){
+    corps += `<div class="bandeau v" style="margin-top:12px"><h3>Export terminé</h3><p style="margin:0;color:var(--txt)">${esc(etat.message)}</p></div>`;
+  } else if(etat && etat.etat==='erreur'){
+    corps += `<div class="bandeau r" style="margin-top:12px"><h3>Erreur</h3><p style="margin:0;color:var(--txt)">${esc(etat.message)}</p></div>`;
+  }
+  corps += `<div class="bandeau n" style="margin-top:14px"><h3>Libérer de la place</h3>
+    <p style="margin:0 0 8px">Déplace les ${c.supprimer} photos « à supprimer » dans <b>_TRI/corbeille_a_verifier</b>. Rien n'est effacé : tu vérifies, puis tu supprimes ce dossier toi-même.</p>
+    <div class="actions" style="justify-content:flex-start;margin:0"><button class="btn danger" id="e-ecart" ${c.supprimer?'':'disabled'}>Mettre de côté</button>
+    ${A._deplacees?`<button class="btn" id="e-restaurer">Remettre les ${A._deplacees} fichiers à leur place</button>`:''}</div></div>
+    <div class="actions">
+      ${etat && etat.etat==='termine'?'<button class="btn" id="e-ouvrir">Ouvrir le dossier</button>':''}
+      <button class="btn" id="e-fermer">Fermer</button>
+      <button class="btn principal" id="e-go" ${etat && etat.etat==='en cours'?'disabled':''}>${etat && etat.etat==='termine'?'Exporter à nouveau':"Lancer l'export"}</button>
+    </div>`;
+  $('#f-export').innerHTML = corps;
+  $('#e-fermer').onclick=()=>{$('#v-export').classList.remove('ouvert');};
+  $('#e-go').onclick=async()=>{await fetch(B+'/exporter',{method:'POST'});suivre();};
+  const o=$('#e-ouvrir'); if(o) o.onclick=()=>fetch(B+'/ouvrir_dossier',{method:'POST',body:JSON.stringify({quoi:'export'})});
+  const ec=$('#e-ecart'); if(ec) ec.onclick=async()=>{
+    if(!confirm(`Déplacer les fichiers des ${c.supprimer} photos « à supprimer » dans _TRI/corbeille_a_verifier ?`)) return;
+    const r=await (await fetch(B+'/mettre_a_lecart',{method:'POST'})).json(); A._deplacees=(A._deplacees||0)+r.deplacees;
+    toast(`${r.deplacees} fichiers mis de côté`); fenetreExport(etat); };
+  const re=$('#e-restaurer'); if(re) re.onclick=async()=>{
+    const r=await (await fetch(B+'/restaurer',{method:'POST'})).json(); A._deplacees=0; toast(`${r.restaurees} fichiers remis en place`); fenetreExport(etat); };
+}
+async function suivre(){
+  clearInterval(suivi);
+  const maj=async()=>{const e=await (await fetch(B+'/export')).json();fenetreExport(e);if(e.etat!=='en cours')clearInterval(suivi);};
+  await maj(); suivi=setInterval(maj,1000);
+}
+$('#b-export').onclick=async()=>{$('#v-export').classList.add('ouvert');const e=await (await fetch(B+'/export')).json();fenetreExport(e);if(e.etat==='en cours')suivre();};
+
+/* --- Actions groupées --- */
+$('#b-plus').onclick=()=>$('#v-plus').classList.add('ouvert');
+$('#a-fermer').onclick=()=>$('#v-plus').classList.remove('ouvert');
+$('#a-doublons').onclick=async()=>{const ids=A.photos.filter(p=>p.suggestion==='doublon').map(p=>p.id);
+  if(ids.length) await decider(ids,'supprimer'); $('#v-plus').classList.remove('ouvert'); rendre();};
+$('#a-suggestions').onclick=async()=>{ if(!confirm('Remettre toutes les décisions aux suggestions de l\'outil ?')) return;
+  for(const s of ['meilleure','garder','supprimer']){const ids=A.photos.filter(p=>decisionParDefaut(p)===s).map(p=>p.id);if(ids.length)await decider(ids,s,true);}
+  toast('Suggestions rétablies'); $('#v-plus').classList.remove('ouvert'); rendre();};
+$('#a-dossier').onclick=()=>fetch(B+'/ouvrir_dossier',{method:'POST',body:'{}'});
+document.querySelectorAll('.voile').forEach(v=>v.addEventListener('click',e=>{if(e.target===v)v.classList.remove('ouvert');}));
+
+charger();
+</script>
+</body>
+</html>
