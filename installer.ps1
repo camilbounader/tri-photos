@@ -98,12 +98,13 @@ Write-Host "Version $($sha.Substring(0,7))" -ForegroundColor DarkGray
 
 # --- 3. Librairies -------------------------------------------------------------
 Etape 3 "Librairies photo"
+& $PyBase -c "import sys,platform,struct;print('Python',sys.version.split()[0],platform.machine(),struct.calcsize('P')*8,'bits')"
 if (-not (Test-Path $PyVenv)) {
     & $PyBase -m venv $DirVenv
     if ($LASTEXITCODE -ne 0) { Echec "Creation de l'environnement Python impossible." }
 }
-& $PyVenv -m pip install --upgrade pip --quiet --disable-pip-version-check
-& $PyVenv -m pip install -r (Join-Path $DirApp 'requirements.txt') --disable-pip-version-check
+& $PyVenv -m pip install --upgrade pip --quiet --disable-pip-version-check --prefer-binary
+& $PyVenv -m pip install -r (Join-Path $DirApp 'requirements.txt') --disable-pip-version-check --prefer-binary
 if ($LASTEXITCODE -ne 0) { Echec "Installation des librairies impossible (pare-feu du PC du travail ?)." }
 
 # --- 4. IA -------------------------------------------------------------------------
@@ -111,7 +112,7 @@ Etape 4 "IA locale (la plus longue etape : 5 a 15 min selon la connexion)"
 $gpu = (Test-Path "$env:SystemRoot\System32\nvidia-smi.exe") -or [bool](Get-Command nvidia-smi -ErrorAction SilentlyContinue)
 if ($gpu) {
     Write-Host "Carte graphique NVIDIA detectee : version rapide (environ 3 Go)."
-    & $PyVenv -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128 --disable-pip-version-check
+    & $PyVenv -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128 --disable-pip-version-check --prefer-binary
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Version carte graphique indisponible, installation de la version processeur." -ForegroundColor Yellow
         $gpu = $false
@@ -119,9 +120,11 @@ if ($gpu) {
 }
 if (-not $gpu) {
     Write-Host "Version processeur (environ 300 Mo). L'analyse sera plus lente qu'avec une carte NVIDIA, mais fonctionne."
-    & $PyVenv -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu --disable-pip-version-check
+    & $PyVenv -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu --disable-pip-version-check --prefer-binary
 }
-& $PyVenv -m pip install open_clip_torch --disable-pip-version-check
+& $PyVenv -c "import torch" 2>$null
+if ($LASTEXITCODE -ne 0) { Write-Host "PyTorch n'a pas pu etre installe." -ForegroundColor Yellow }
+& $PyVenv -m pip install open_clip_torch --disable-pip-version-check --prefer-binary
 $iaOk = ($LASTEXITCODE -eq 0)
 if (-not $iaOk) { Write-Host "L'IA n'a pas pu etre installee : l'appli marchera sans (tri sur criteres techniques)." -ForegroundColor Yellow }
 
