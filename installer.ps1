@@ -122,8 +122,9 @@ if (-not $gpu) {
     Write-Host "Version processeur (environ 300 Mo). L'analyse sera plus lente qu'avec une carte NVIDIA, mais fonctionne."
     & $PyVenv -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu --disable-pip-version-check --prefer-binary
 }
-& $PyVenv -c "import torch" 2>$null
-if ($LASTEXITCODE -ne 0) { Write-Host "PyTorch n'a pas pu etre installe." -ForegroundColor Yellow }
+$torchOk = $false
+try { & $PyVenv -c "import torch" 2>$null; $torchOk = ($LASTEXITCODE -eq 0) } catch {}
+if (-not $torchOk) { Write-Host "PyTorch n'a pas pu etre installe." -ForegroundColor Yellow }
 & $PyVenv -m pip install open_clip_torch --disable-pip-version-check --prefer-binary
 $iaOk = ($LASTEXITCODE -eq 0)
 if (-not $iaOk) { Write-Host "L'IA n'a pas pu etre installee : l'appli marchera sans (tri sur criteres techniques)." -ForegroundColor Yellow }
