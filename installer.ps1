@@ -107,50 +107,16 @@ if (-not (Test-Path $PyVenv)) {
 & $PyVenv -m pip install -r (Join-Path $DirApp 'requirements.txt') --disable-pip-version-check --prefer-binary
 if ($LASTEXITCODE -ne 0) { Echec "Installation des librairies impossible (pare-feu du PC du travail ?)." }
 
-# --- 4. IA -------------------------------------------------------------------------
+# --- 4 et 5. IA ----------------------------------------------------------------------
 Etape 4 "IA locale (la plus longue etape : 5 a 15 min selon la connexion)"
-$gpu = (Test-Path "$env:SystemRoot\System32\nvidia-smi.exe") -or [bool](Get-Command nvidia-smi -ErrorAction SilentlyContinue)
-if ($gpu) {
-    Write-Host "Carte graphique NVIDIA detectee : version rapide (environ 3 Go)."
-    & $PyVenv -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128 --disable-pip-version-check --prefer-binary
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Version carte graphique indisponible, installation de la version processeur." -ForegroundColor Yellow
-        $gpu = $false
-    }
-}
-if (-not $gpu) {
-    Write-Host "Version processeur (environ 300 Mo). L'analyse sera plus lente qu'avec une carte NVIDIA, mais fonctionne."
-    & $PyVenv -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu --disable-pip-version-check --prefer-binary
-}
-$torchOk = $false
-try { & $PyVenv -c "import torch" 2>$null; $torchOk = ($LASTEXITCODE -eq 0) } catch {}
-if (-not $torchOk) { Write-Host "PyTorch n'a pas pu etre installe." -ForegroundColor Yellow }
-# PyYAML : il faut une version precompilee (pas de compilateur C++ sur la plupart des PC)
-& $PyVenv -m pip install pyyaml --only-binary=:all: --disable-pip-version-check
-$yamlOk = ($LASTEXITCODE -eq 0)
-if ($yamlOk) {
-    & $PyVenv -m pip install open_clip_torch --disable-pip-version-check --prefer-binary
-    $iaOk = ($LASTEXITCODE -eq 0)
-} else {
-    Write-Host "Pas de PyYAML precompile pour ce PC : installation sans PyYAML (non necessaire a Tri Photos)." -ForegroundColor Yellow
-    & $PyVenv -m pip install --no-deps open_clip_torch timm huggingface_hub --disable-pip-version-check --prefer-binary
-    & $PyVenv -m pip install regex ftfy tqdm safetensors filelock fsspec packaging requests typing_extensions wcwidth --only-binary=:all: --disable-pip-version-check
-    $sp = (& $PyVenv -c "import sysconfig;print(sysconfig.get_paths()['purelib'])").Trim()
-    New-Item -ItemType Directory -Force -Path (Join-Path $sp 'yaml') | Out-Null
-    Copy-Item -LiteralPath (Join-Path $DirApp 'outils\yaml_minimal.py') -Destination (Join-Path $sp 'yaml\__init__.py') -Force
-    $iaOk = $false
-    try { & $PyVenv -c "import open_clip" 2>$null; $iaOk = ($LASTEXITCODE -eq 0) } catch {}
-}
-if (-not $iaOk) { Write-Host "L'IA n'a pas pu etre installee : l'appli marchera sans (tri sur criteres techniques)." -ForegroundColor Yellow }
-
-# --- 5. Modeles d'IA ---------------------------------------------------------------
-Etape 5 "Modeles d'IA (environ 1 Go, une seule fois)"
-if ($iaOk) {
-    Push-Location $DirApp
-    & $PyVenv ia.py --telecharger
-    Pop-Location
-    if ($LASTEXITCODE -ne 0) { Write-Host "Les modeles seront telecharges au premier tri (avec internet)." -ForegroundColor Yellow }
-}
+Write-Host "Le detail est note dans $Base\installation_ia.log"
+Push-Location $DirApp
+& $PyVenv (Join-Path $DirApp 'outils\installer_ia.py')
+$iaOk = ($LASTEXITCODE -eq 0)
+Pop-Location
+Etape 5 "Bilan de l'IA"
+if ($iaOk) { Write-Host "IA installee." -ForegroundColor Green }
+else { Write-Host "L'IA n'a pas pu etre installee. L'appli marche sans ; tu pourras reessayer avec le bouton 'Installer l'IA' de l'accueil." -ForegroundColor Yellow }
 
 # --- 6. Icones -----------------------------------------------------------------------
 Etape 6 "Icone sur le bureau et dans le menu Demarrer"

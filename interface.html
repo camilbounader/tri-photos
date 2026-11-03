@@ -129,6 +129,29 @@ kbd.k{border:1px solid var(--ligne);border-radius:4px;padding:0 5px;font-family:
 .barre{height:8px;background:var(--carte);border-radius:99px;overflow:hidden;margin:14px 0 6px}
 .barre i{display:block;height:100%;width:0;background:var(--vert);transition:width .3s}
 .fenetre .actions{margin-top:16px;justify-content:flex-end}
+/* Sélection multiple */
+.photo .coche{position:absolute;left:8px;bottom:8px;width:26px;height:26px;border-radius:50%;border:2px solid #fff;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#fff}
+body.mode-sel .photo .coche{display:flex}
+body.mode-sel .photo .rapide{display:none}
+.photo.choisie{outline-color:var(--bleu)!important}
+.photo.choisie .coche{background:var(--bleu);border-color:var(--bleu)}
+.photo.choisie img{opacity:.85}
+.tout-moment{display:none;margin-left:auto}
+body.mode-sel .tout-moment{display:inline-flex}
+#barre-sel{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:40;background:var(--fond2);border:1px solid var(--ligne);border-radius:16px;padding:10px 12px;display:none;gap:8px;align-items:center;flex-wrap:wrap;box-shadow:0 10px 40px rgba(0,0,0,.6);max-width:calc(100vw - 24px)}
+body.mode-sel #barre-sel{display:flex}
+#barre-sel b{font-variant-numeric:tabular-nums;padding:0 6px}
+body.mode-sel main{padding-bottom:110px}
+.btn.bleu{background:var(--bleu);border-color:var(--bleu);color:#0b1a2b;font-weight:600}
+/* Outil Récupérer */
+.recup label{display:block;font-size:14px;margin-top:10px}
+.recup .lig{display:flex;justify-content:space-between;color:var(--doux);font-size:13px}
+.recup .lig b{color:var(--txt);font-variant-numeric:tabular-nums}
+.recup input[type=range]{width:100%;accent-color:var(--ambre)}
+.recup .boutons{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+.recup .boutons .btn{padding:7px 12px}
+.verdict{font-size:14px;margin-top:6px}
+.btn.ambre{background:var(--ambre);border-color:var(--ambre);color:#1b1407;font-weight:600}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--txt);color:var(--fond);padding:9px 16px;border-radius:999px;font-weight:600;z-index:80;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.vu{opacity:1}
 </style>
@@ -157,6 +180,7 @@ kbd.k{border:1px solid var(--ligne);border-radius:4px;padding:0 5px;font-family:
   <button class="btn" data-filtre="supprimer">À supprimer<span class="n" id="f-supprimer"></span></button>
   <button class="btn" data-filtre="doublon">Doublons<span class="n" id="f-doublon"></span></button>
   <span class="sep"></span>
+  <button class="btn" id="b-sel">☐ Sélectionner</button>
   <label><input type="checkbox" id="replier" checked> Une seule photo par série</label>
   <label class="taille">Taille <input type="range" id="taille" min="120" max="420" step="10" value="220"></label>
   <button class="btn" id="b-plus">Actions ▾</button>
@@ -170,6 +194,9 @@ kbd.k{border:1px solid var(--ligne);border-radius:4px;padding:0 5px;font-family:
     <button class="btn" id="d-fermer">✕ Fermer</button>
     <span class="nom" id="d-nom"></span><span class="pos" id="d-pos"></span>
     <span class="sep"></span>
+    <button class="btn" id="d-gauche" title="Pivoter vers la gauche">⟲</button>
+    <button class="btn" id="d-droite" title="Pivoter vers la droite (P)">⟳</button>
+    <button class="btn ambre" id="d-recup" title="Récupérer une photo cramée depuis le RAW (H)">Récupérer…</button>
     <button class="btn" id="d-retouche" title="Comparer avec la retouche automatique (R)">Retouche auto</button>
     <button class="btn" id="d-zoom" title="Taille réelle (Z ou double-clic)">Zoom 100 %</button>
   </div>
@@ -196,12 +223,24 @@ kbd.k{border:1px solid var(--ligne);border-radius:4px;padding:0 5px;font-family:
     <button class="btn" id="a-fermer">Fermer</button>
   </div>
 </div></div>
+<div id="barre-sel">
+  <b id="n-sel">0 sélectionnée</b>
+  <button class="btn" data-sel-dec="meilleure">★ Meilleure</button>
+  <button class="btn" data-sel-dec="garder">✓ Garder</button>
+  <button class="btn" data-sel-dec="supprimer">✕ Supprimer</button>
+  <button class="btn bleu" id="b-envoi">Envoyer sur Google Photos…</button>
+  <button class="btn" id="b-sel-aucune">Tout désélectionner</button>
+  <button class="btn" id="b-sel-fin">Terminer</button>
+</div>
+<div class="voile" id="v-envoi"><div class="fenetre" id="f-envoi"></div></div>
 <div class="toast" id="toast"></div>
 
 <script>
 const $ = s => document.querySelector(s);
 const B = location.pathname.replace(/\/+$/,'');
 let A, D, PH = {}, filtre = 'tout', replie = true, liste = [], idx = -1, retouche = false, seriesOuvertes = new Set();
+let RECUP = {}, ver = {}, modeSel = false, sel = new Set(), dernierClic = null, modeRecup = false;
+const vq = id => `?r=${PH[id]?.rotation||0}&v=${ver[id]||0}`;
 const NOMS = {meilleure:'★ Meilleure', garder:'À garder', supprimer:'À supprimer'};
 const jours = ['dim.','lun.','mar.','mer.','jeu.','ven.','sam.'];
 const fmtH = t => new Date(t*1000).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
@@ -212,7 +251,7 @@ function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('vu');clea
 
 async function charger(){
   const r = await (await fetch(B+'/donnees')).json();
-  A = r.analyse; D = r.decisions; A.photos.forEach(p => PH[p.id] = p);
+  A = r.analyse; D = r.decisions; A.photos.forEach(p => PH[p.id] = p); RECUP = r.recup || {};
   A._envoi = r.envoi; A._deplacees = r.deplacees;
   $('#titre').textContent = A.nom;
   const ia = {aucune:'sans IA (critères techniques)', clip:'IA : variété', 'clip+esthetique':'IA : note esthétique + variété'}[A.mode_ia];
@@ -246,11 +285,13 @@ function carte(p, serieN, estMembre){
   if(d!=='supprimer' && p.suggestion==='rejet') past += `<span class="pastille r">${esc(p.rejets[0])}</span>`;
   if(p.suggestion==='doublon' && d!=='supprimer') past += '<span class="pastille a">Doublon</span>';
   else if(p.proche_de && p.suggestion==='garder' && d==='garder') past += '<span class="pastille">Proche d\'une ★</span>';
-  if(p.badges?.some(b=>b.includes('rattrapable'))) past += '<span class="pastille">Rattrapable</span>';
+  if(RECUP[p.id]) past += '<span class="pastille a">Récupérée</span>';
+  else if(p.badges?.some(b=>b.includes('rattrapable'))) past += '<span class="pastille">Rattrapable</span>';
   const serie = serieN>1 ? `<button class="serie" data-serie="${p.serie}">${seriesOuvertes.has(p.serie)?'Replier':'+'+(serieN-1)+' similaires'}</button>` : '';
-  return `<div class="photo d-${d}${estMembre?' membre':''}" data-id="${esc(p.id)}" style="flex:${r} 1 calc(${r} * ${h});">
+  return `<div class="photo d-${d}${estMembre?' membre':''}${sel.has(p.id)?' choisie':''}" data-id="${esc(p.id)}" style="flex:${r} 1 calc(${r} * ${h});">
     <i style="padding-bottom:${(100/r).toFixed(3)}%"></i>
-    <img loading="lazy" src="${B}/mini/${encodeURIComponent(p.id)}.jpg" alt="">
+    <img loading="lazy" src="${B}/mini/${encodeURIComponent(p.id)}.jpg${vq(p.id)}" alt="">
+    <span class="coche">${sel.has(p.id)?'✓':''}</span>
     <div class="etat">${past}</div>
     <div class="rapide">
       <button data-act="meilleure" title="Meilleure (S)">★</button>
@@ -288,7 +329,7 @@ function rendre(){
     const nM = ph.filter(p=>D[p.id]==='meilleure').length;
     html += `<section class="moment"><div class="titre-moment"><h2>Moment ${m+1}</h2>
       <span class="quand">${fmtJ(ph[0].date)} · ${fmtH(ph[0].date)} → ${fmtH(ph[ph.length-1].date)}</span>
-      <span class="info">${ph.length} photos · ${nM} ★</span></div><div class="grille">${cartes}</div></section>`;
+      <span class="info">${ph.length} photos · ${nM} ★</span><button class="btn tout-moment" data-moment="${m}">Tout sélectionner</button></div><div class="grille">${cartes}</div></section>`;
   });
   $('#contenu').innerHTML = html || '<div class="vide">Aucune photo dans ce filtre.</div>';
 }
@@ -304,8 +345,17 @@ async function decider(ids, statut, silencieux){
 $('#contenu').addEventListener('click', async e => {
   const s = e.target.closest('.serie');
   if(s){e.stopPropagation();const n=+s.dataset.serie;seriesOuvertes.has(n)?seriesOuvertes.delete(n):seriesOuvertes.add(n);rendre();return;}
+  const tm = e.target.closest('[data-moment]');
+  if(tm){ const ids=[...tm.closest('.moment').querySelectorAll('.photo')].map(x=>x.dataset.id);
+    const tous = ids.every(i=>sel.has(i)); ids.forEach(i=>tous?sel.delete(i):sel.add(i)); majSel(); return; }
   const b = e.target.closest('.rapide button'), c = e.target.closest('.photo');
   if(!c) return;
+  if(modeSel){
+    const id = c.dataset.id, i = liste.indexOf(id);
+    if(e.shiftKey && dernierClic!==null){ const [a,z]=[Math.min(i,dernierClic),Math.max(i,dernierClic)]; liste.slice(a,z+1).forEach(x=>sel.add(x)); }
+    else sel.has(id) ? sel.delete(id) : sel.add(id);
+    dernierClic = i; majSel(); return;
+  }
   if(b){e.stopPropagation();await decider(c.dataset.id,b.dataset.act);rendre();return;}
   ouvrir(liste.indexOf(c.dataset.id));
 });
@@ -320,9 +370,9 @@ $('#taille').onchange=e=>{try{localStorage.setItem('tri-taille',e.target.value)}
 
 /* --- Diaporama --- */
 const img = $('#d-img'), scene = $('#scene');
-function src(id){return `${B}/${retouche?'retouche':'original'}/${encodeURIComponent(id)}.jpg`;}
+function src(id){return `${B}/${retouche?'retouche':'original'}/${encodeURIComponent(id)}.jpg${vq(id)}`;}
 function ouvrir(i){if(i<0)return;idx=i;$('#diapo').classList.add('ouvert');document.body.style.overflow='hidden';afficher();}
-function fermer(){$('#diapo').classList.remove('ouvert');document.body.style.overflow='';scene.classList.remove('zoom');rendre();
+function fermer(){modeRecup=false;$('#diapo').classList.remove('ouvert');document.body.style.overflow='';scene.classList.remove('zoom');rendre();
   const c=document.querySelector(`.photo[data-id="${CSS.escape(liste[idx]||'')}"]`);if(c)c.scrollIntoView({block:'center'});}
 function afficher(){
   const p = PH[liste[idx]];
@@ -331,7 +381,8 @@ function afficher(){
   $('#d-retouche').classList.toggle('on', retouche);
   $('#d-badge').style.display = retouche ? 'block' : 'none';
   // vignette tout de suite, puis pleine qualité
-  img.src = `${B}/mini/${encodeURIComponent(p.id)}.jpg`;
+  if(modeRecup) return ouvrirRecup();
+  img.src = `${B}/mini/${encodeURIComponent(p.id)}.jpg${vq(p.id)}`;
   $('#d-charge').hidden = false;
   const plein = new Image();
   plein.onload = () => { if(liste[idx]===p.id){ img.src = plein.src; $('#d-charge').hidden = true; } };
@@ -349,7 +400,9 @@ function panneau(p){
       ${p.proche_de?`<p style="margin:8px 0 0"><button class="lien" data-aller="${esc(p.proche_de)}">Voir ${esc(p.proche_de)}</button></p>`:''}</div>`;
   else b += `<div class="bandeau n"><h3>Photo correcte, non retenue dans les meilleures</h3>${p.raisons.length?`<ul>${p.raisons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`:''}
       ${p.proche_de?`<p style="margin:8px 0 0"><button class="lien" data-aller="${esc(p.proche_de)}">Voir ${esc(p.proche_de)}</button></p>`:''}</div>`;
-  if(p.badges?.length) b += `<div class="bandeau n"><h3>À savoir</h3><ul>${p.badges.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
+  if(RECUP[p.id]) b += `<div class="bandeau a"><h3>Récupération appliquée</h3><ul><li>Exposition ${fmtEv(RECUP[p.id].ev)}, hautes lumières ${Math.round(RECUP[p.id].hl)}, blancs ${Math.round(RECUP[p.id].bl)}, ombres ${Math.round(RECUP[p.id].om)}.</li><li>Utilisée pour le JPEG retouché à l'export.</li></ul></div>`;
+  else if(p.capteur_sature!=null && p.part_blanc > 0.03) b += `<div class="bandeau a"><h3>Photo claire ou cramée ?</h3><ul><li>${(p.capteur_sature*100).toFixed(1).replace('.',',')} % du capteur saturé (définitivement blanc).</li><li>Essaie <button class="lien" data-ouvrir-recup>Récupérer…</button> pour voir ce que le RAW permet.</li></ul></div>`;
+  if(p.badges?.length) b += `<div class="bandeau n"><h3>À savoir</h3><ul>${p.badges.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>${p.badges.includes('redressée automatiquement')?'<p style="margin:8px 0 0;font-size:13px;color:var(--doux)">Mal redressée ? Utilise ⟲ ⟳ en haut.</p>':''}</div>`;
   const tech = [p.vitesse && (p.vitesse+' s'), p.ouverture, p.iso && ('ISO '+p.iso), p.focale].filter(Boolean).join(' · ');
   $('#panneau').innerHTML = `
     <div class="decisions">
@@ -366,7 +419,7 @@ function panneau(p){
       <dt>Fichiers</dt><dd>${[p.raw,p.jpg].filter(Boolean).map(f=>esc(f.split(/[\\/]/).pop())).join(' + ')}</dd>
     </dl>
     <div class="raccourcis"><kbd class="k">←</kbd> <kbd class="k">→</kbd> naviguer · <kbd class="k">S</kbd> <kbd class="k">G</kbd> <kbd class="k">X</kbd> décider (passe à la suivante)<br>
-      <kbd class="k">R</kbd> retouche auto · <kbd class="k">Z</kbd> zoom 100 % · <kbd class="k">Échap</kbd> fermer</div>`;
+      <kbd class="k">R</kbd> retouche auto · <kbd class="k">H</kbd> récupérer · <kbd class="k">P</kbd> pivoter · <kbd class="k">Z</kbd> zoom 100 % · <kbd class="k">Échap</kbd> fermer</div>`;
 }
 function bouger(n){ if(!liste.length) return; idx = (idx + n + liste.length) % liste.length; scene.classList.remove('zoom'); afficher(); }
 async function deciderDiapo(statut, avancer){
@@ -376,6 +429,7 @@ async function deciderDiapo(statut, avancer){
   compter();
 }
 $('#panneau').addEventListener('click', e=>{
+  if(e.target.closest('[data-ouvrir-recup]')) return ouvrirRecup();
   const b=e.target.closest('[data-dec]'); if(b) return deciderDiapo(b.dataset.dec, false);
   const a=e.target.closest('[data-aller]');
   if(a){ let j=liste.indexOf(a.dataset.aller);
@@ -388,6 +442,9 @@ $('#d-zoom').onclick=zoom; img.ondblclick=zoom;
 document.addEventListener('keydown', e=>{
   if(!$('#diapo').classList.contains('ouvert')) return;
   const k=e.key.toLowerCase();
+  if(modeRecup){ if(k==='escape') fermerRecup(); else if(k==='z') zoom(); return; }
+  if(k==='h'){ return ouvrirRecup(); }
+  if(k==='p'){ return pivoter(90); }
   if(k==='arrowright'||k===' '){e.preventDefault();bouger(1);}
   else if(k==='arrowleft'){e.preventDefault();bouger(-1);}
   else if(k==='escape'){ if(scene.classList.contains('zoom')) zoom(); else fermer(); }
@@ -403,6 +460,157 @@ scene.addEventListener('touchstart',e=>{x0=e.touches[0].clientX},{passive:true})
 scene.addEventListener('touchend',e=>{ if(x0===null||scene.classList.contains('zoom')) return;
   const dx=e.changedTouches[0].clientX-x0; if(Math.abs(dx)>50) bouger(dx<0?1:-1); x0=null; });
 
+
+/* --- Rotation --- */
+async function pivoter(sens){
+  const id = liste[idx]; if(!id) return;
+  const r = await (await fetch(B+'/pivoter',{method:'POST',body:JSON.stringify({id, sens})})).json();
+  if(r.erreur) return toast(r.erreur);
+  Object.assign(PH[id], {rotation:r.rotation, largeur:r.largeur, hauteur:r.hauteur, badges:r.badges});
+  ver[id] = (ver[id]||0) + 1; afficher();
+}
+$('#d-gauche').onclick=()=>pivoter(-90); $('#d-droite').onclick=()=>pivoter(90);
+
+/* --- Outil « Récupérer » --- */
+let RI = null, RR = null, rAttente = null, rZones = false, rUrl = null;
+const fmtEv = v => (v>0?'+':'') + Number(v).toFixed(2).replace('.',',').replace(/,?0+$/,'') + ' IL';
+async function ouvrirRecup(){
+  const id = liste[idx]; modeRecup = true; scene.classList.remove('zoom');
+  $('#d-recup').classList.add('on'); $('#d-badge').style.display='block'; $('#d-badge').textContent='Récupération (RAW)';
+  $('#panneau').innerHTML = '<div class="bandeau n"><h3>Préparation du RAW…</h3><p style="margin:0;color:var(--doux)">Quelques secondes la première fois.</p></div>';
+  try{ RI = await (await fetch(`${B}/recup_infos/${encodeURIComponent(id)}`)).json(); }
+  catch(e){ $('#panneau').innerHTML = '<div class="bandeau r"><h3>Impossible de lire cette photo</h3></div>'; return; }
+  if(RI.erreur){ $('#panneau').innerHTML = `<div class="bandeau r"><h3>${esc(RI.erreur)}</h3></div>`; return; }
+  RR = Object.assign({}, RI.enregistres || RI.auto);
+  panneauRecup(); rendreRecup();
+}
+function verdict(){
+  const p = RI.perdu, pa = RI.partiel, f = x => x.toFixed(1).replace('.',',');
+  if(p < 0.5) return `<span style="color:#7fd8a1">✓ Rattrapable</span> : presque rien n'est définitivement perdu (${f(p)} %).`;
+  if(p < 3) return `<span style="color:#f3c86e">Rattrapable en grande partie</span> : ${f(p)} % resteront blancs (souvent le soleil ou des reflets).`;
+  return `<span style="color:#ff9a86">Difficile</span> : ${f(p)} % de l'image n'a plus aucune information, même dans le RAW.`;
+}
+function panneauRecup(){
+  const id = liste[idx];
+  const curseur = (k, lib, mn, mx, pas, fmt) => `<label><span class="lig"><span>${lib}</span><b id="rv-${k}">${fmt(RR[k])}</b></span>
+     <input type="range" data-r="${k}" min="${mn}" max="${mx}" step="${pas}" value="${RR[k]}"></label>`;
+  $('#panneau').innerHTML = `<div class="recup">
+    <div class="bandeau a"><h3>Récupérer depuis le RAW</h3>
+      <p style="margin:0;font-size:14px">Baisse l'exposition et adoucis les hautes lumières pour voir ce que le fichier contient encore.</p>
+      ${RI.est_raw?'':'<p style="margin:6px 0 0;font-size:13px;color:#ff9a86">Pas de fichier RAW : sur un JPEG, les zones blanches ne se récupèrent presque pas.</p>'}</div>
+    <div class="verdict">${verdict()}</div>
+    ${curseur('ev','Exposition',-3,2,0.05,fmtEv)}
+    ${curseur('hl','Hautes lumières (récupération)',0,100,1,v=>Math.round(v))}
+    ${curseur('bl','Blancs',-100,100,1,v=>(v>0?'+':'')+Math.round(v))}
+    ${curseur('om','Ombres',0,100,1,v=>Math.round(v))}
+    <label style="display:flex;gap:8px;align-items:center;margin-top:14px"><input type="checkbox" id="r-zones" ${rZones?'checked':''}> Montrer les zones perdues</label>
+    <p style="margin:4px 0 0;font-size:12px;color:var(--doux)">Rouge : blanc pur même dans le RAW. Orange : une partie des couleurs perdue.</p>
+    <div class="boutons">
+      <button class="btn ambre" id="r-garder">Garder ces réglages</button>
+      <button class="btn" id="r-auto">Auto</button>
+      <button class="btn" id="r-annuler">Annuler</button>
+      ${RI.enregistres?'<button class="btn" id="r-effacer">Retirer mes réglages</button>':''}
+    </div>
+    <p style="font-size:12px;color:var(--doux);margin-top:12px">Les réglages gardés servent au JPEG retouché à l'export et à l'envoi « retouchées ». Le RAW original n'est jamais modifié. <kbd class="k">Échap</kbd> pour revenir.</p>
+  </div>`;
+  document.querySelectorAll('[data-r]').forEach(inp => inp.oninput = () => {
+    const k = inp.dataset.r; RR[k] = Number(inp.value);
+    $('#rv-'+k).textContent = k==='ev' ? fmtEv(RR[k]) : (k==='bl' && RR[k]>0 ? '+' : '') + Math.round(RR[k]);
+    rendreRecup();
+  });
+  $('#r-zones').onchange = e => { rZones = e.target.checked; rendreRecup(); };
+  $('#r-auto').onclick = () => { RR = Object.assign({}, RI.auto); panneauRecup(); rendreRecup(); };
+  $('#r-annuler').onclick = fermerRecup;
+  $('#r-garder').onclick = async () => {
+    await fetch(B+'/recup',{method:'POST',body:JSON.stringify({id, reglages:RR})});
+    RECUP[id] = Object.assign({}, RR); ver[id] = (ver[id]||0)+1;
+    let msg = 'Réglages gardés';
+    if(D[id]==='supprimer'){ await decider(id,'garder',true); msg += ' · photo remise en « à garder »'; compter(); }
+    toast(msg); fermerRecup();
+  };
+  if($('#r-effacer')) $('#r-effacer').onclick = async () => {
+    await fetch(B+'/recup',{method:'POST',body:JSON.stringify({id, reglages:null})});
+    delete RECUP[id]; ver[id] = (ver[id]||0)+1; toast('Réglages retirés'); fermerRecup();
+  };
+}
+function rendreRecup(){
+  clearTimeout(rAttente);
+  rAttente = setTimeout(async () => {
+    const id = liste[idx], q = new URLSearchParams({ev:RR.ev, hl:RR.hl, bl:RR.bl, om:RR.om, zones:rZones?1:0});
+    $('#d-charge').hidden = false; $('#d-charge').textContent = 'Développement du RAW…';
+    try{
+      const blob = await (await fetch(`${B}/recup/${encodeURIComponent(id)}.jpg?${q}`)).blob();
+      if(!modeRecup || liste[idx]!==id) return;
+      if(rUrl) URL.revokeObjectURL(rUrl);
+      rUrl = URL.createObjectURL(blob); img.src = rUrl;
+    } finally { $('#d-charge').hidden = true; $('#d-charge').textContent = 'Chargement en pleine qualité…'; }
+  }, 120);
+}
+function fermerRecup(){
+  modeRecup = false; $('#d-recup').classList.remove('on'); $('#d-badge').textContent='Retouche automatique';
+  afficher();
+}
+$('#d-recup').onclick = () => modeRecup ? fermerRecup() : ouvrirRecup();
+
+/* --- Sélection multiple --- */
+function majSel(){
+  document.querySelectorAll('.photo').forEach(c => { const on = sel.has(c.dataset.id); c.classList.toggle('choisie', on); c.querySelector('.coche').textContent = on ? '✓' : ''; });
+  $('#n-sel').textContent = `${sel.size} sélectionnée${sel.size>1?'s':''}`;
+  $('#b-envoi').disabled = !sel.size;
+}
+function modeSelection(on){
+  modeSel = on; document.body.classList.toggle('mode-sel', on);
+  $('#b-sel').classList.toggle('on', on); $('#b-sel').textContent = on ? '☑ Sélection en cours' : '☐ Sélectionner';
+  if(!on){ sel.clear(); dernierClic = null; }
+  majSel();
+}
+$('#b-sel').onclick = () => modeSelection(!modeSel);
+$('#b-sel-fin').onclick = () => modeSelection(false);
+$('#b-sel-aucune').onclick = () => { sel.clear(); majSel(); };
+document.querySelectorAll('[data-sel-dec]').forEach(b => b.onclick = async () => {
+  if(!sel.size) return; await decider([...sel], b.dataset.selDec); rendre(); majSel();
+});
+let suiviEnvoi = null;
+function fenetreEnvoi(etat){
+  const n = sel.size, m = A._envoi;
+  let h = `<h2>Envoyer sur Google Photos</h2>`;
+  if(!etat || etat.etat==='repos' || etat.etat==='erreur'){
+    h += `<p>${n} photo${n>1?'s':''} sélectionnée${n>1?'s':''}. L'appli prépare un dossier avec seulement ces photos, puis ouvre Google Photos dans ton navigateur : tu n'as plus qu'à y glisser les fichiers.</p>
+      <div class="bloc-choix">
+        ${[['originaux','Fichiers originaux (RAW + JPEG de l\'appareil)','Qualité maximale. Google Photos compte leur taille réelle dans ton espace.'],
+           ['jpeg_appareil','JPEG de l\'appareil (ou RAW s\'il n\'y en a pas)','Plus léger.'],
+           ['retouchees','JPEG retouchés','Avec la retouche auto, tes réglages « Récupérer » et la rotation. Un peu plus long.']]
+          .map(([v,l,e])=>`<label style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--ligne)"><input type="radio" name="mode-envoi" value="${v}" ${v===m?'checked':''}><span><b>${l}</b><br><span style="color:var(--doux);font-size:13px">${e}</span></span></label>`).join('')}
+      </div>
+      ${etat && etat.etat==='erreur' ? `<div class="bandeau r" style="margin-top:10px"><h3>Erreur</h3><p style="margin:0">${esc(etat.message)}</p></div>` : ''}
+      <div class="actions"><button class="btn" id="en-fermer">Fermer</button><button class="btn bleu" id="en-go">Préparer l'envoi</button></div>`;
+  } else if(etat.etat==='en cours'){
+    const pc = etat.total ? Math.round(100*etat.fait/etat.total) : 0;
+    h += `<div class="barre"><i style="width:${pc}%"></i></div><p>${esc(etat.message)} ${etat.fait}/${etat.total}</p>`;
+  } else {
+    h += `<div class="bandeau v"><h3>C'est prêt</h3><p style="margin:0;color:var(--txt)">${esc(etat.message)}</p></div>
+      <ol style="color:var(--txt);padding-left:20px;line-height:1.6">
+        <li>Le dossier s'est ouvert sur ton PC, et Google Photos dans ton navigateur.</li>
+        <li>Sélectionne tous les fichiers du dossier (Ctrl+A) et glisse-les dans la page Google Photos.</li>
+        <li>Pour les partager : dans Google Photos, ajoute-les à un album partagé avec ton pote.</li>
+      </ol>
+      <p style="font-size:13px;word-break:break-all">Dossier : ${esc(etat.dossier)}</p>
+      <div class="actions"><button class="btn" id="en-fermer">Fermer</button><button class="btn" id="en-vider">Fermer et vider la sélection</button></div>`;
+  }
+  $('#f-envoi').innerHTML = h;
+  if($('#en-fermer')) $('#en-fermer').onclick = () => $('#v-envoi').classList.remove('ouvert');
+  if($('#en-vider')) $('#en-vider').onclick = () => { $('#v-envoi').classList.remove('ouvert'); sel.clear(); majSel(); };
+  if($('#en-go')) $('#en-go').onclick = async () => {
+    const mode = document.querySelector('[name=mode-envoi]:checked').value;
+    const r = await fetch(B+'/preparer_envoi',{method:'POST',body:JSON.stringify({ids:[...sel], mode})});
+    const j = await r.json(); if(!r.ok) return fenetreEnvoi({etat:'erreur', message:j.erreur});
+    clearInterval(suiviEnvoi);
+    suiviEnvoi = setInterval(async () => { const e = await (await fetch(B+'/envoi')).json(); fenetreEnvoi(e); if(e.etat!=='en cours') clearInterval(suiviEnvoi); }, 700);
+    fenetreEnvoi(j);
+  };
+}
+$('#b-envoi').onclick = () => { if(!sel.size) return; $('#v-envoi').classList.add('ouvert'); fenetreEnvoi(null); };
+
 /* --- Export --- */
 let suivi=null;
 function fenetreExport(etat){
@@ -412,7 +620,7 @@ function fenetreExport(etat){
     <div class="ligne-export"><span>★ Meilleures : RAW original + JPEG retouché + formats</span><b>${c.meilleure}</b></div>
     <div class="ligne-export"><span>Dossier prêt pour Google Photos (meilleures + à garder)</span><b>${c.meilleure+c.garder}</b></div>
     <div class="ligne-export"><span>À supprimer (listées, non envoyées)</span><b>${c.supprimer}</b></div>
-    <p>Le dossier pour Google Photos contiendra ${envoi} (modifiable dans « 3 - Reglages »). Tu n'auras plus qu'à le glisser sur photos.google.com.</p>`;
+    <p>Le dossier pour Google Photos contiendra ${envoi} (modifiable dans les Réglages). Tu n'auras plus qu'à le glisser sur photos.google.com.</p>`;
   if(etat && etat.etat==='en cours'){
     const pc = etat.total ? Math.round(100*etat.fait/etat.total) : 0;
     corps += `<div class="barre"><i style="width:${pc}%"></i></div><p>${esc(etat.message)} ${etat.fait}/${etat.total}</p>`;

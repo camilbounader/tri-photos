@@ -17,7 +17,7 @@ from PIL import Image, ImageOps
 
 import config_tri
 from analyse import (appliquer_orientation, image_integree, orientation_raw,
-                     redimensionner, rawpy)
+                     redimensionner, rawpy, tourner)
 
 CONFIG, _ = config_tri.charger()
 
@@ -109,20 +109,84 @@ def developper(lin: np.ndarray, est_raw: bool) -> np.ndarray:
     return (np.clip(srgb, 0, 1) * 255 + 0.5).astype(np.uint8)
 
 
-def charger_lineaire(p, demi_taille=False):
-    """Renvoie (image linéaire float32, est_raw)."""
+def charger_lineaire(p, demi_taille=False, taille_max=None):
+    """Renvoie (image linéaire float32 remise à l'endroit, est_raw)."""
     if p.get("raw") and rawpy is not None:
         with rawpy.imread(p["raw"]) as raw:
             rgb16 = raw.postprocess(
                 use_camera_wb=True, output_bps=16, gamma=(1, 1), no_auto_bright=True,
                 highlight_mode=rawpy.HighlightMode.Blend, output_color=rawpy.ColorSpace.sRGB,
                 half_size=demi_taille)
-        return rgb16.astype(np.float32) / 65535.0, True
-    with Image.open(p["jpg"]) as im:
-        rgb = np.asarray(ImageOps.exif_transpose(im).convert("RGB"))
-    if demi_taille:
-        rgb = redimensionner(rgb, max(rgb.shape[:2]) // 2)
-    return srgb_vers_lineaire(rgb.astype(np.float32) / 255.0), False
+        if taille_max:
+            rgb16 = redimensionner(rgb16, taille_max)
+        lin, est_raw = rgb16.astype(np.float32) / 65535.0, True
+    else:
+        with Image.open(p["jpg"]) as im:
+            rgb = np.asarray(ImageOps.exif_transpose(im).convert("RGB"))
+        if demi_taille:
+            rgb = redimensionner(rgb, max(rgb.shape[:2]) // 2)
+        if taille_max:
+            rgb = redimensionner(rgb, taille_max)
+        lin, est_raw = srgb_vers_lineaire(rgb.astype(np.float32) / 255.0), False
+    return np.ascontiguousarray(tourner(lin, p.get("rotation", 0))), est_raw
+
+
+# ---------------------------------------------------------------------------
+# Récupération des photos cramées (réglages choisis à la main)
+# ---------------------------------------------------------------------------
+REGLAGES_RECUP_DEFAUT = {"ev": 0.0, "hl": 60, "bl": 0, "om": 30}
+
+
+def reglages_auto(lin):
+    """Réglages de départ pour récupérer une photo trop claire (ou trop sombre)."""
+    lum = 0.2126 * lin[::4, ::4, 0] + 0.7152 * lin[::4, ::4, 1] + 0.0722 * lin[::4, ::4, 2]
+    cle = float(np.exp(np.mean(np.log(lum + 1e-4))))
+    ev = float(np.clip(np.log2(0.16 / max(cle, 1e-4)), -3.0, 1.5))
+    return {"ev": round(ev * 4) / 4, "hl": 75, "bl": -20, "om": 35}
+
+
+def developper_reglages(lin, est_raw, r):
+    """Développement avec les curseurs de l'outil « Récupérer » :
+    ev = exposition (IL), hl = récupération des hautes lumières (0-100),
+    bl = blancs (-100 à 100), om = ombres débouchées (0-100)."""
+    ev = float(r.get("ev", 0)); hl = float(r.get("hl", 60)); bl = float(r.get("bl", 0)); om = float(r.get("om", 30))
+    x = lin * (2.0 ** ev)
+    y = courbe_hautes_lumieres(x, seuil=0.95 - 0.65 * np.clip(hl, 0, 100) / 100)
+    srgb = lineaire_vers_srgb(y)
+    w = np.clip(bl, -100, 100) / 100
+    if w:
+        srgb = srgb + 0.35 * w * srgb ** 3  # agit surtout sur les tons les plus clairs
+    if om > 0:
+        ycc = cv2.cvtColor(np.clip(srgb, 0, 1).astype(np.float32), cv2.COLOR_RGB2YCrCb)
+        L = ycc[..., 0]
+        ycc[..., 0] = np.clip(L + (om / 100) * 0.6 * L * (1 - L) ** 3, 0, 1)
+        srgb = cv2.cvtColor(ycc, cv2.COLOR_YCrCb2RGB)
+    if CONFIG["vibrance"] > 0:
+        srgb = np.clip(srgb, 0, 1)
+        mx, mn = srgb.max(axis=2), srgb.min(axis=2)
+        sat = (mx - mn) / (mx + 1e-6)
+        gris = srgb.mean(axis=2, keepdims=True)
+        srgb = gris + (srgb - gris) * (1 + CONFIG["vibrance"] * (1 - sat))[..., None]
+    return (np.clip(srgb, 0, 1) * 255 + 0.5).astype(np.uint8)
+
+
+def zones_perdues(lin, img):
+    """Colore en rouge les zones sans aucune information (blanc pur même dans le RAW)
+    et en orange celles où une partie des couleurs est perdue. Renvoie (image, % perdu, % partiel)."""
+    sature = lin >= 0.985
+    perdu = sature.all(axis=2)
+    partiel = sature.any(axis=2) & ~perdu
+    out = img.astype(np.float32)
+    out[perdu] = out[perdu] * 0.3 + np.array([230, 40, 40]) * 0.7
+    out[partiel] = out[partiel] * 0.55 + np.array([255, 150, 30]) * 0.45
+    return out.astype(np.uint8), float(perdu.mean() * 100), float(partiel.mean() * 100)
+
+
+def developper_photo(p, lin, est_raw):
+    """Développement d'une photo : réglages « Récupérer » s'il y en a, sinon automatique."""
+    if p.get("recup"):
+        return developper_reglages(lin, est_raw, p["recup"])
+    return developper(lin, est_raw)
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +211,7 @@ def apercu_original(p, chemin_cache):
                 img = None
             if img is None or max(img.shape[:2]) < 2400:  # aperçu intégré trop petit
                 img = raw.postprocess(half_size=True, use_camera_wb=True)
+    img = tourner(img, p.get("rotation", 0))
     _enregistrer(redimensionner(img, TAILLE_ECRAN), chemin_cache)
     return chemin_cache
 
@@ -155,7 +220,7 @@ def apercu_retouche(p, chemin_cache):
     if os.path.exists(chemin_cache):
         return chemin_cache
     lin, est_raw = charger_lineaire(p, demi_taille=True)
-    img = developper(lin, est_raw)
+    img = developper_photo(p, lin, est_raw)
     _enregistrer(redimensionner(img, TAILLE_ECRAN), chemin_cache)
     return chemin_cache
 
@@ -244,7 +309,7 @@ def exporter_meilleure(p, dossier_meilleures, dossiers_formats):
         if f and os.path.exists(f):
             lier(f, os.path.join(dossier_meilleures, os.path.basename(f)))
     lin, est_raw = charger_lineaire(p)
-    img = developper(lin, est_raw)
+    img = developper_photo(p, lin, est_raw)
     del lin
     exif = exif_pour_export(p)
     nom = p["id"] + ".jpg"
@@ -268,6 +333,6 @@ def exporter_meilleure(p, dossier_meilleures, dossiers_formats):
 
 def exporter_retouchee_simple(p, dossier):
     lin, est_raw = charger_lineaire(p)
-    img = developper(lin, est_raw)
+    img = developper_photo(p, lin, est_raw)
     sauver_jpeg(img, os.path.join(dossier, p["id"] + ".jpg"), exif_pour_export(p))
     return p["id"]

@@ -60,6 +60,7 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--doux
 footer{margin-top:40px;display:flex;gap:10px;flex-wrap:wrap;border-top:1px solid var(--ligne);padding-top:18px}
 .tel{margin-top:12px;display:none} .tel.vu{display:block}
 .tel code{display:block;background:var(--fond);border:1px solid var(--ligne);border-radius:8px;padding:8px 10px;margin:6px 0;word-break:break-all;font-size:14px}
+.journal{background:var(--fond);border:1px solid var(--ligne);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--doux);white-space:pre-wrap;max-height:140px;overflow:auto;margin:10px 0 0}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--txt);color:var(--fond);padding:9px 16px;border-radius:999px;font-weight:600;z-index:80;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
 .toast.vu{opacity:1}
 @media (max-width:600px){ .sorties{grid-template-columns:1fr 1fr;gap:10px} .sortie .pied{display:none} h2{margin-top:26px} }
@@ -76,6 +77,7 @@ footer{margin-top:40px;display:flex;gap:10px;flex-wrap:wrap;border-top:1px solid
   </header>
 
   <div id="zone-tache"></div>
+  <div id="zone-ia"></div>
   <div id="zone-sd"></div>
 
   <h2>Nouvelle sortie</h2>
@@ -121,7 +123,7 @@ const fmtDate = t => new Date(t*1000).toLocaleDateString('fr-FR',{weekday:'short
 async function charger(){
   try{ D = await (await fetch('/api/accueil')).json(); }catch(e){ return planifier(5000); }
   rendre();
-  planifier(D.tache.etat==='en cours' ? 1000 : 4000);
+  planifier(D.tache.etat==='en cours' || D.installation_ia?.etat==='en cours' ? 1500 : 4000);
 }
 function planifier(ms){ clearTimeout(minuteur); minuteur = setTimeout(charger, ms); }
 
@@ -137,6 +139,7 @@ function rendre(){
 
   // Tâche
   const t = D.tache; let h = '';
+  const occupe = t.etat==='en cours';
   if(t.etat==='en cours' || t.etat==='termine' || t.etat==='erreur'){
     const pc = t.total ? Math.round(100*t.fait/t.total) : 0;
     const titre = t.etat==='erreur' ? 'Problème' : t.etat==='termine' ? 'Prêt à trier' : (t.type==='import' ? 'Import de la carte' : 'Analyse en cours');
@@ -156,7 +159,26 @@ function rendre(){
     if(t.etat==='termine' && attenteSid===t.sid){ attenteSid=null; location.href=`/s/${t.sid}/`; }
   }
   $('#zone-tache').innerHTML = h;
-  const occupe = t.etat==='en cours';
+
+  // IA
+  const ins = D.installation_ia; let hi = '';
+  if(ia.verifie && !ia.dispo && !D.sur_telephone){
+    const enCours = ins && ins.etat==='en cours';
+    hi = `<h2>IA</h2><div class="bloc"><h3 style="margin:0 0 4px;font-size:17px">${enCours?'Installation de l\'IA en cours…':'L\'IA n\'est pas installée'}</h3>`;
+    if(enCours){
+      hi += `<div class="barre indet"><i></i></div><pre class="journal">${esc(ins.lignes.join('\n'))}</pre>
+        <div class="note">5 à 15 minutes selon la connexion. Tu peux continuer à trier pendant ce temps.</div>`;
+    } else {
+      hi += `<div class="note" style="color:var(--txt);margin:0">Elle juge l'esthétique et repère les scènes qui se ressemblent, pour une sélection plus juste et plus variée. Il faut internet pour l'installer (une seule fois, environ 1 à 3 Go).</div>`;
+      if(ins && (ins.etat==='echec' || ins.etat==='interrompue'))
+        hi += `<pre class="journal">${esc(ins.lignes.join('\n'))}</pre><div class="note">La dernière tentative a échoué. Envoie le journal à Claude : <button class="lien" id="b-journal">ouvrir le journal</button></div>`;
+      hi += `<div class="ligne" style="margin-top:12px"><button class="btn principal" id="b-ia" ${occupe?'disabled':''}>Installer l'IA</button></div>`;
+    }
+    hi += '</div>';
+  }
+  $('#zone-ia').innerHTML = hi;
+  if($('#b-ia')) $('#b-ia').onclick = async()=>{ try{ await post('/api/installer_ia'); charger(); }catch(e){ toast(e.message); } };
+  if($('#b-journal')) $('#b-journal').onclick = ()=>post('/api/ouvrir_journal_ia');
 
   // Cartes SD (on garde ce que l'utilisateur a tapé dans le champ nom)
   document.querySelectorAll('[data-nom-sd]').forEach(i=>sdNoms[i.dataset.nomSd]=i.value);

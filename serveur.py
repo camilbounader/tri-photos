@@ -9,6 +9,7 @@ en ligne) qui affiche l'appli dans le navigateur.
 """
 
 import hashlib
+import io
 import json
 import os
 import secrets
@@ -17,12 +18,15 @@ import socket
 import threading
 import time
 import traceback
+from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
+
+from PIL import Image
 
 import analyse
 import config_tri
@@ -59,6 +63,11 @@ def ecrire_json(chemin: Path, donnees):
     os.replace(tmp, chemin)
 
 
+def taille_lisible(dossier: Path):
+    o = sum(f.stat().st_size for f in dossier.iterdir() if f.is_file())
+    return f"{o / 1e9:.1f} Go".replace(".", ",") if o >= 1e9 else f"{max(1, round(o / 1e6))} Mo"
+
+
 def ouvrir_dossier(chemin: Path):
     try:
         if os.name == "nt":
@@ -88,9 +97,130 @@ class Session:
         self.verrou = threading.Lock()
         self.verrous_rendu = {}
         self.export = {"etat": "repos", "fait": 0, "total": 0, "message": ""}
+        self.envoi = {"etat": "repos", "fait": 0, "total": 0, "message": ""}
+        self.fichier_recup = self.sortie / "recuperation.json"
+        self.recup = {k: v for k, v in lire_json(self.fichier_recup, {}).items() if k in self.photos}
+        self.lin_cache = OrderedDict()  # images RAW développées en mémoire pour l'outil « Récupérer »
         (self.sortie / "cache" / "original").mkdir(parents=True, exist_ok=True)
         (self.sortie / "cache" / "retouche").mkdir(parents=True, exist_ok=True)
         self.sauver_decisions()
+
+    def photo(self, pid):
+        """Infos d'une photo + ses réglages « Récupérer » éventuels (pour les rendus et l'export)."""
+        return dict(self.photos[pid], recup=self.recup.get(pid))
+
+    def sauver_analyse(self):
+        with self.verrou:
+            ecrire_json(self.sortie / "analyse.json", self.analyse)
+
+    def oublier_rendus(self, pid):
+        for type_ in ("original", "retouche"):
+            (self.sortie / "cache" / type_ / (pid + ".jpg")).unlink(missing_ok=True)
+        self.lin_cache.pop(pid, None)
+
+    # --- Rotation ------------------------------------------------------------------
+    def pivoter(self, pid, sens):
+        sens = 90 if sens >= 0 else 270
+        p = self.photos[pid]
+        p["rotation"] = (p.get("rotation", 0) + sens) % 360
+        p["largeur"], p["hauteur"] = p["hauteur"], p["largeur"]
+        mini = self.sortie / "miniatures" / p["miniature"]
+        with Image.open(mini) as im:
+            im = im.rotate(-sens, expand=True)  # PIL tourne dans le sens inverse des aiguilles d'une montre
+            im.save(mini, quality=90)
+        if "redressée automatiquement" in p.get("badges", []) and p["rotation"] != p.get("rotation_auto"):
+            p["badges"] = [b for b in p["badges"] if b != "redressée automatiquement"]
+        self.oublier_rendus(pid)
+        self.sauver_analyse()
+        return p["rotation"]
+
+    # --- Outil « Récupérer » ---------------------------------------------------------
+    def base_recup(self, pid):
+        with self.verrou:
+            if pid in self.lin_cache:
+                self.lin_cache.move_to_end(pid)
+                return self.lin_cache[pid]
+        donnees = developpement.charger_lineaire(self.photos[pid], demi_taille=True, taille_max=1800)
+        with self.verrou:
+            self.lin_cache[pid] = donnees
+            while len(self.lin_cache) > 4:
+                self.lin_cache.popitem(last=False)
+        return donnees
+
+    def rendu_recup(self, pid, reglages, zones):
+        lin, est_raw = self.base_recup(pid)
+        img = developpement.developper_reglages(lin, est_raw, reglages)
+        perdu = partiel = None
+        if zones:
+            img, perdu, partiel = developpement.zones_perdues(lin, img)
+        tampon = io.BytesIO()
+        Image.fromarray(img).save(tampon, "JPEG", quality=90)
+        return tampon.getvalue(), perdu, partiel
+
+    def infos_recup(self, pid):
+        lin, est_raw = self.base_recup(pid)
+        sature = lin >= 0.985
+        return {"auto": developpement.reglages_auto(lin), "enregistres": self.recup.get(pid),
+                "defaut": developpement.REGLAGES_RECUP_DEFAUT, "est_raw": est_raw,
+                "perdu": round(float(sature.all(axis=2).mean() * 100), 1),
+                "partiel": round(float((sature.any(axis=2) & ~sature.all(axis=2)).mean() * 100), 1),
+                "capteur": self.photos[pid].get("capteur_sature")}
+
+    def sauver_recup(self, pid, reglages):
+        if reglages:
+            self.recup[pid] = {k: float(reglages.get(k, v)) for k, v in developpement.REGLAGES_RECUP_DEFAUT.items()}
+        else:
+            self.recup.pop(pid, None)
+        ecrire_json(self.fichier_recup, self.recup)
+        (self.sortie / "cache" / "retouche" / (pid + ".jpg")).unlink(missing_ok=True)
+
+    # --- Envoi d'une sélection vers Google Photos ---------------------------------------
+    def preparer_envoi(self, ids, mode, ouvrir=True):
+        if self.envoi["etat"] == "en cours":
+            raise RuntimeError("Un envoi est déjà en préparation.")
+        ids = [i for i in ids if i in self.photos]
+        if not ids:
+            raise ValueError("Aucune photo sélectionnée.")
+        base = self.sortie / "envoi" / datetime.now().strftime("%Y-%m-%d %Hh%M")
+        dest, n = base, 2
+        while dest.exists():
+            dest = base.with_name(f"{base.name} ({n})")
+            n += 1
+        self.envoi = {"etat": "en cours", "fait": 0, "total": len(ids), "message": "Préparation…", "dossier": str(dest)}
+        threading.Thread(target=self._envoyer, args=(ids, mode, dest, ouvrir), daemon=True).start()
+
+    def _envoyer(self, ids, mode, dest, ouvrir):
+        en = self.envoi
+        try:
+            dest.mkdir(parents=True)
+            if mode == "retouchees":
+                en["message"] = "Développement des photos…"
+                with ProcessPoolExecutor(max_workers=2) as pool:
+                    futurs = [pool.submit(developpement.exporter_retouchee_simple, self.photo(i), str(dest)) for i in ids]
+                    for f in as_completed(futurs):
+                        try:
+                            f.result()
+                        except Exception as exc:
+                            print("  ! développement impossible :", exc)
+                        en["fait"] += 1
+            else:
+                for i in ids:
+                    p = self.photos[i]
+                    fichiers = [p.get("raw"), p.get("jpg")]
+                    if mode == "jpeg_appareil":
+                        fichiers = [p["jpg"]] if p.get("jpg") else [p.get("raw")]
+                    for f in fichiers:
+                        if f and os.path.exists(f):
+                            developpement.lier(f, str(dest / Path(f).name))
+                    en["fait"] += 1
+            en.update(etat="termine", message=f"{len(ids)} photos prêtes ({taille_lisible(dest)}).")
+            if ouvrir:
+                ouvrir_dossier(dest)
+                import webbrowser
+                webbrowser.open("https://photos.google.com/")
+        except Exception as exc:
+            traceback.print_exc()
+            en.update(etat="erreur", message=str(exc))
 
     def sauver_decisions(self):
         with self.verrou:
@@ -107,7 +237,7 @@ class Session:
 
     # --- Rendus haute qualité -------------------------------------------------
     def rendu(self, pid, type_):
-        p = self.photos[pid]
+        p = self.photo(pid)
         chemin = str(self.sortie / "cache" / type_ / (pid + ".jpg"))
         if os.path.exists(chemin):
             return chemin
@@ -155,9 +285,9 @@ class Session:
             for d in formats.values():
                 d.mkdir(parents=True)
 
-            meilleures = [p for pid, p in self.photos.items() if self.decisions[pid] == "meilleure"]
-            a_envoyer = [p for pid, p in self.photos.items() if self.decisions[pid] in ("meilleure", "garder")]
-            a_suppr = [p for pid, p in self.photos.items() if self.decisions[pid] == "supprimer"]
+            meilleures = [self.photo(pid) for pid in self.photos if self.decisions[pid] == "meilleure"]
+            a_envoyer = [self.photo(pid) for pid in self.photos if self.decisions[pid] in ("meilleure", "garder")]
+            a_suppr = [self.photo(pid) for pid in self.photos if self.decisions[pid] == "supprimer"]
             mode = cfg["envoi_google_photos"]
             a_developper = list(meilleures)
             if mode == "retouchees":
@@ -326,7 +456,40 @@ class Appli:
         self.cle = secrets.token_urlsafe(8)
         self.serveur_tel = None
         self.port = 0
+        self.install_ia = None  # processus d'installation de l'IA en cours
         threading.Thread(target=self._verifier_ia, daemon=True).start()
+
+    # --- Installation de l'IA depuis l'appli ---------------------------------------
+    def lancer_installation_ia(self):
+        import subprocess
+        import sys
+        if self.install_ia is not None and self.install_ia.poll() is None:
+            return False
+        (config_tri.DONNEES / "installation_ia.etat").write_text("en cours", encoding="utf-8")
+        self.install_ia = subprocess.Popen([sys.executable, str(DOSSIER_OUTIL / "outils" / "installer_ia.py")],
+                                           cwd=str(DOSSIER_OUTIL))
+
+        def attendre():
+            self.install_ia.wait()
+            import importlib
+            importlib.invalidate_caches()
+            self._verifier_ia()
+        threading.Thread(target=attendre, daemon=True).start()
+        return True
+
+    def etat_installation_ia(self):
+        f_etat = config_tri.DONNEES / "installation_ia.etat"
+        f_log = config_tri.DONNEES / "installation_ia.log"
+        if not f_etat.exists():
+            return None
+        try:
+            lignes = [l for l in f_log.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()]
+        except Exception:
+            lignes = []
+        etat = f_etat.read_text(encoding="utf-8").strip()
+        if etat == "en cours" and (self.install_ia is None or self.install_ia.poll() is not None):
+            etat = "interrompue"
+        return {"etat": etat, "lignes": lignes[-6:], "journal": str(f_log)}
 
     def _verifier_ia(self):
         try:
@@ -434,6 +597,8 @@ class Appli:
             defaut = {p["id"]: {"meilleure": "meilleure", "rejet": "supprimer"}.get(p.get("suggestion"), "garder")
                       for p in ancienne.get("photos", [])}
             manuelles = {pid: d for pid, d in anciennes_dec.items() if d in STATUTS and d != defaut.get(pid)}
+            rot_manuelles = {p["id"]: p.get("rotation", 0) for p in ancienne.get("photos", [])
+                             if p.get("rotation", 0) != p.get("rotation_auto", 0)}
             shutil.rmtree(sortie / "cache", ignore_errors=True)
             resultat = analyse.lancer(dossier, sortie, max(1, (os.cpu_count() or 2) - 1),
                                       progres=self._progres)
@@ -441,6 +606,20 @@ class Appli:
                 raise RuntimeError("Aucune photo lisible dans ce dossier.")
             ids = {p["id"] for p in resultat["photos"]}
             ecrire_json(sortie / "decisions.json", {k: v for k, v in manuelles.items() if k in ids})
+            if rot_manuelles:  # rotations faites à la main : on les réapplique
+                for p in resultat["photos"]:
+                    if p["id"] not in rot_manuelles:
+                        continue
+                    delta = (rot_manuelles[p["id"]] - p.get("rotation", 0)) % 360
+                    if delta:
+                        mini = sortie / "miniatures" / p["miniature"]
+                        with Image.open(mini) as im:
+                            im.rotate(-delta, expand=True).save(mini, quality=90)
+                        if delta in (90, 270):
+                            p["largeur"], p["hauteur"] = p["hauteur"], p["largeur"]
+                        p["rotation"] = rot_manuelles[p["id"]]
+                        p["badges"] = [b for b in p.get("badges", []) if b != "redressée automatiquement"]
+                ecrire_json(sortie / "analyse.json", resultat)
             self.ajouter_biblio(dossier)
             self.tache.update(etat="termine", etape="Terminé",
                               message=f"{resultat['nb_meilleures']} meilleures proposées sur "
@@ -602,6 +781,7 @@ def creer_gestionnaire(appli: Appli):
                         "sorties": appli.sorties(), "cartes": cartes_sd(deja),
                         "dossier_import": config_tri.config_locale()["dossier_import"],
                         "telephone": appli.serveur_tel is not None,
+                        "installation_ia": appli.etat_installation_ia(),
                         "sur_telephone": self.client_address[0] not in ("127.0.0.1", "::1")})
                 if chemin == "/api/tache":
                     return self._json(appli.tache)
@@ -634,10 +814,29 @@ def creer_gestionnaire(appli: Appli):
             if reste == "donnees":
                 cfg, infos = config_tri.charger()
                 return self._json({"analyse": s.analyse, "decisions": s.decisions, "export": s.export,
+                                   "recup": s.recup,
                                    "reglages_infos": infos, "envoi": cfg["envoi_google_photos"],
                                    "deplacees": len(s.deplacees())})
             if reste == "export":
                 return self._json(s.export)
+            if reste == "envoi":
+                return self._json(s.envoi)
+            if reste.startswith("recup_infos/"):
+                pid = reste.split("/", 1)[1]
+                if pid not in s.photos:
+                    raise KeyError("photo inconnue")
+                return self._json(s.infos_recup(pid))
+            if reste.startswith("recup/"):
+                pid = reste.split("/", 1)[1].rsplit(".", 1)[0]
+                if pid not in s.photos:
+                    raise KeyError("photo inconnue")
+                q = parse_qs(urlparse(self.path).query)
+                reglages = {k: float(q.get(k, [v])[0]) for k, v in developpement.REGLAGES_RECUP_DEFAUT.items()}
+                data, perdu, partiel = s.rendu_recup(pid, reglages, q.get("zones", ["0"])[0] == "1")
+                entetes = {}
+                if perdu is not None:
+                    entetes = {"X-Perdu": f"{perdu:.2f}", "X-Partiel": f"{partiel:.2f}"}
+                return self._envoyer(200, data, "image/jpeg", entetes=entetes)
             type_, _, nom = reste.partition("/")
             pid = nom.rsplit(".", 1)[0]
             if type_ in ("mini", "original", "retouche") and pid in s.photos:
@@ -679,6 +878,13 @@ def creer_gestionnaire(appli: Appli):
                 if chemin == "/api/ouvrir_dossier_sortie":
                     s = next(x for x in appli.biblio() if x["sid"] == corps.get("sid"))
                     ouvrir_dossier(Path(s["dossier"]))
+                    return self._json({"ok": True})
+                if chemin == "/api/installer_ia":
+                    if not local:
+                        raise ValueError("L'installation se lance depuis le PC.")
+                    return self._json({"ok": appli.lancer_installation_ia()})
+                if chemin == "/api/ouvrir_journal_ia":
+                    ouvrir_dossier(config_tri.DONNEES / "installation_ia.log")
                     return self._json({"ok": True})
                 if chemin == "/api/telephone":
                     return self._json({"urls": appli.activer_telephone()})
@@ -732,6 +938,25 @@ def creer_gestionnaire(appli: Appli):
                 return self._json({"ok": True})
             if action == "exporter":
                 return self._json({"ok": s.lancer_export()})
+            if action == "pivoter":
+                pid = corps.get("id")
+                if pid not in s.photos:
+                    return self._json({"erreur": "photo inconnue"}, 400)
+                return self._json({"rotation": s.pivoter(pid, int(corps.get("sens", 90))),
+                                   "largeur": s.photos[pid]["largeur"], "hauteur": s.photos[pid]["hauteur"],
+                                   "badges": s.photos[pid].get("badges", [])})
+            if action == "recup":
+                pid = corps.get("id")
+                if pid not in s.photos:
+                    return self._json({"erreur": "photo inconnue"}, 400)
+                s.sauver_recup(pid, corps.get("reglages"))
+                return self._json({"ok": True, "recup": s.recup})
+            if action == "preparer_envoi":
+                mode = corps.get("mode", "originaux")
+                if mode not in ("originaux", "jpeg_appareil", "retouchees"):
+                    raise ValueError("mode inconnu")
+                s.preparer_envoi(corps.get("ids") or [], mode, ouvrir=local)
+                return self._json(s.envoi)
             if action == "mettre_a_lecart":
                 return self._json({"deplacees": s.mettre_a_lecart()})
             if action == "restaurer":

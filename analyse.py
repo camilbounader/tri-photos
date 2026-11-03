@@ -158,7 +158,9 @@ def image_integree(raw, orientation):
 
 
 def charger_apercu(entree, orientation_exif):
+    """Aperçu remis à l'endroit + part du capteur saturée + orientation notée par l'appareil."""
     stats_capteur, img = None, None
+    orientation = orientation_exif
     if entree["raw"] and rawpy is not None:
         with rawpy.imread(entree["raw"]) as raw:
             orientation = orientation_raw(raw, orientation_exif)
@@ -174,7 +176,41 @@ def charger_apercu(entree, orientation_exif):
     if img is None:
         with Image.open(entree["jpg"]) as im:
             img = np.asarray(ImageOps.exif_transpose(im).convert("RGB"))
-    return redimensionner(img, TAILLE_APERCU), stats_capteur
+    return redimensionner(img, TAILLE_APERCU), stats_capteur, orientation
+
+
+def tourner(img: np.ndarray, degres: int) -> np.ndarray:
+    """Rotation dans le sens des aiguilles d'une montre (0, 90, 180, 270)."""
+    degres %= 360
+    if degres == 90:
+        return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    if degres == 180:
+        return cv2.rotate(img, cv2.ROTATE_180)
+    if degres == 270:
+        return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return img
+
+
+def rotation_conseillee(rgb: np.ndarray) -> int:
+    """Photo couchée ? On cherche le ciel (clair, bleuté, peu de détails) sur un côté.
+    Renvoie la rotation à appliquer (90 = ciel à gauche, 270 = ciel à droite) ou 0.
+    Volontairement prudent : en cas de doute, on ne tourne pas."""
+    h0, w0 = rgb.shape[:2]
+    petit = cv2.resize(rgb, (240, max(2, round(240 * h0 / w0))), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+    h, w = petit.shape[:2]
+    gris = petit.mean(axis=2)
+    tex = np.abs(cv2.Laplacian(cv2.GaussianBlur(gris, (0, 0), 1), cv2.CV_32F))
+    tmoy = tex.mean() + 1e-4
+    bleu = petit[..., 2] - petit[..., 0]
+
+    def ciel(zone):
+        return gris[zone].mean() + 0.5 * max(0.0, float(bleu[zone].mean())) - 0.35 * min(2.0, tex[zone].mean() / tmoy)
+    bh, bw = max(2, int(h * 0.18)), max(2, int(w * 0.18))
+    s = {"haut": ciel(np.s_[:bh, :]), "bas": ciel(np.s_[-bh:, :]),
+         "gauche": ciel(np.s_[:, :bw]), "droite": ciel(np.s_[:, -bw:])}
+    if max(s["gauche"], s["droite"]) - max(s["haut"], s["bas"]) > 0.15 and abs(s["gauche"] - s["droite"]) > 0.3:
+        return 90 if s["gauche"] > s["droite"] else 270
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +276,12 @@ def analyser(entree, dossier_miniatures):
     """Analyse d'une prise de vue. Tourne dans un processus séparé."""
     source = entree["raw"] or entree["jpg"]
     exif = lire_exif(source)
-    apercu, capteur_sature = charger_apercu(entree, exif["orientation"])
+    apercu, capteur_sature, orientation = charger_apercu(entree, exif["orientation"])
+    rotation = 0
+    # L'appareil n'a pas noté d'orientation et la photo est en paysage : elle est peut-être couchée
+    if orientation in (0, 1, None) and apercu.shape[1] > apercu.shape[0]:
+        rotation = rotation_conseillee(apercu)
+        apercu = tourner(apercu, rotation)
     gris = cv2.cvtColor(apercu, cv2.COLOR_RGB2GRAY)
     lum = gris.astype(np.float32) / 255.0
     mini = redimensionner(apercu, TAILLE_MINIATURE)
@@ -250,6 +291,8 @@ def analyser(entree, dossier_miniatures):
         **entree,
         **{k: exif[k] for k in ("date", "marque", "modele", "iso", "vitesse", "ouverture", "focale")},
         "miniature": nom_mini,
+        "rotation": rotation,
+        "rotation_auto": rotation,
         "largeur": int(apercu.shape[1]),
         "hauteur": int(apercu.shape[0]),
         "nettete": nettete(gris),
@@ -298,6 +341,8 @@ def diagnostiquer(photos):
                                f"{p['part_blanc']:.0%} de l'image est blanche et il n'y a pas de RAW pour la récupérer."))
             else:
                 badges.append("hautes lumières perdues")
+        if p.get("rotation_auto"):
+            badges.append("redressée automatiquement")
         p["rejets"] = [r[0] for r in rejets]
         p["explications_rejet"] = [r[1] for r in rejets]
         p["badges"] = badges

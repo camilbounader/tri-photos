@@ -6,6 +6,9 @@ aucune photo n'est envoyée sur internet, et ça marche hors connexion une fois 
 - Importe la carte SD, repère les photos **floues, noires ou cramées sans espoir** (en lisant les vraies données du capteur RAW)
 - Regroupe les **rafales et photos similaires**, propose les **meilleures** (IA locale : note esthétique + variété des scènes)
 - Diaporama en pleine qualité pour valider en quelques touches : **S** meilleure · **G** garder · **X** supprimer
+- **Récupérer** une photo cramée en un clic (touche **H**) : exposition, hautes lumières, blancs et ombres développés depuis le RAW, avec les zones définitivement perdues en rouge
+- Photos couchées **redressées automatiquement** quand l'appareil n'a pas noté l'orientation, et boutons ⟲ ⟳ (touche **P**)
+- **Sélection multiple** (clic, Maj+clic, tout un moment) puis **Envoyer sur Google Photos** : un dossier avec seulement ces photos, et Google Photos s'ouvre pour les y glisser
 - Export : meilleures en **RAW original + JPEG retouché**, fonds d'écran PC et téléphone, Instagram, et un dossier prêt pour **Google Photos** avec seulement les photos gardées
 - Lit les RAW Nikon (NEF), Canon, Sony, Fuji, Olympus, Panasonic, DNG, et les JPEG
 
@@ -21,6 +24,7 @@ irm https://raw.githubusercontent.com/camilbounader/tri-photos/main/installer.ps
 3. Attends la fin (10 à 20 min la première fois, surtout pour l'IA). Une icône **Tri Photos** apparaît sur le bureau.
 
 L'installation se fait avec internet ; ensuite l'appli fonctionne hors connexion.
+Si l'IA n'a pas pu s'installer, l'accueil de l'appli propose un bouton **Installer l'IA** pour réessayer (le détail est noté dans `%LOCALAPPDATA%\TriPhotos\installation_ia.log`).
 Avec une carte graphique NVIDIA, l'IA utilise la carte (rapide) ; sinon le processeur (plus lent, mais ça marche).
 Relancer la même ligne répare ou réinstalle l'appli.
 
