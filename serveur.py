@@ -375,6 +375,7 @@ class Appli:
                     next((p["id"] for p in photos if p.get("suggestion") == "meilleure"), None)
                 info["couverture"] = couv
                 info["exporte"] = (d / "_TRI" / "export").exists()
+                info["a_jour"] = a.get("version") == analyse.VERSION_ANALYSE
             res.append(info)
         return res
 
@@ -427,13 +428,19 @@ class Appli:
             self.sessions.pop(sid, None)
             sortie = dossier / "_TRI"
             sortie.mkdir(exist_ok=True)
-            if reanalyser:
-                shutil.rmtree(sortie / "cache", ignore_errors=True)
-                (sortie / "decisions.json").unlink(missing_ok=True)
+            # On garde les choix faits à la main ; les autres suivront les nouvelles suggestions
+            ancienne = lire_json(sortie / "analyse.json", {})
+            anciennes_dec = lire_json(sortie / "decisions.json", {})
+            defaut = {p["id"]: {"meilleure": "meilleure", "rejet": "supprimer"}.get(p.get("suggestion"), "garder")
+                      for p in ancienne.get("photos", [])}
+            manuelles = {pid: d for pid, d in anciennes_dec.items() if d in STATUTS and d != defaut.get(pid)}
+            shutil.rmtree(sortie / "cache", ignore_errors=True)
             resultat = analyse.lancer(dossier, sortie, max(1, (os.cpu_count() or 2) - 1),
                                       progres=self._progres)
             if resultat is None:
                 raise RuntimeError("Aucune photo lisible dans ce dossier.")
+            ids = {p["id"] for p in resultat["photos"]}
+            ecrire_json(sortie / "decisions.json", {k: v for k, v in manuelles.items() if k in ids})
             self.ajouter_biblio(dossier)
             self.tache.update(etat="termine", etape="Terminé",
                               message=f"{resultat['nb_meilleures']} meilleures proposées sur "

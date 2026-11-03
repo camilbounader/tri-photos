@@ -46,6 +46,7 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--doux
 .sorties{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
 .sortie{background:var(--fond2);border:1px solid var(--ligne);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
 .sortie a.couv{display:block;aspect-ratio:3/2;background:var(--carte) center/cover no-repeat;position:relative}
+.sortie a.couv span.maj{background:var(--ambre);color:#1b1407}
 .sortie a.couv span{position:absolute;left:10px;top:10px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:rgba(0,0,0,.7)}
 .sortie .corps{padding:12px 14px;display:flex;flex-direction:column;gap:6px;flex:1}
 .sortie h4{margin:0;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -185,12 +186,17 @@ function rendre(){
       <div class="pied"><button class="btn" data-retirer="${s.sid}">Retirer de la liste</button></div></div></div>`;
     const c = s.compte || {};
     const couv = s.couverture ? `background-image:url('/s/${s.sid}/mini/${encodeURIComponent(s.couverture)}.jpg')` : '';
+    if(!s.a_jour) return `<div class="sortie"><a class="couv" href="#" data-maj="${s.sid}" style="${couv}"><span class="maj">Analyse à mettre à jour</span></a>
+      <div class="corps"><h4 title="${esc(s.nom)}">${esc(s.nom)}</h4><div class="date">${fmtDate(s.date)} · ${s.n_photos} photos</div>
+      <div class="note" style="margin:0">Nouvelle détection du flou, plus juste. Tes choix faits à la main sont gardés.</div>
+      <div class="pied"><button class="btn principal" data-maj="${s.sid}" ${occupe?'disabled':''}>Mettre à jour</button>
+        <button class="btn" data-retirer="${s.sid}">Retirer</button></div></div></div>`;
     return `<div class="sortie"><a class="couv" href="/s/${s.sid}/" style="${couv}">${s.exporte?'<span>Exportée</span>':''}</a>
       <div class="corps"><h4 title="${esc(s.nom)}">${esc(s.nom)}</h4><div class="date">${fmtDate(s.date)} · ${s.n_photos} photos</div>
       <div class="comptes"><span class="v">★ ${c.meilleure||0}</span><span>✓ ${c.garder||0}</span><span class="r">✕ ${c.supprimer||0}</span></div>
       <div class="pied"><a class="btn" href="/s/${s.sid}/">Ouvrir</a>
         <button class="btn" data-dossier="${s.sid}">Dossier</button>
-        <button class="btn" data-reanalyser="${s.sid}" ${occupe?'disabled':''} title="Refaire l'analyse avec les réglages actuels (tes décisions seront réinitialisées)">Réanalyser</button>
+        <button class="btn" data-reanalyser="${s.sid}" ${occupe?'disabled':''} title="Refaire l'analyse avec les réglages actuels (tes choix faits à la main sont gardés)">Réanalyser</button>
         <button class="btn" data-retirer="${s.sid}" title="Retire de la liste, sans toucher aux photos">Retirer</button></div></div></div>`;
   }).join('') + '</div>';
 }
@@ -209,13 +215,16 @@ $('#b-chemin-go').onclick = () => { const c=$('#chemin').value.trim(); if(c) ouv
 $('#chemin').onkeydown = e => { if(e.key==='Enter') $('#b-chemin-go').click(); };
 
 document.addEventListener('click', async e => {
-  const b = e.target.closest('button'); if(!b) return;
+  const b = e.target.closest('button,[data-maj]'); if(!b) return;
+  if(b.tagName==='A') e.preventDefault();
   try{
-    if(b.dataset.importer){
+    if(b.dataset.maj){
+      const r = await post('/api/reanalyser', {sid:b.dataset.maj}); attenteSid = r.sid; charger();
+    } else if(b.dataset.importer){
       const nom = document.querySelector(`[data-nom-sd="${CSS.escape(b.dataset.importer)}"]`)?.value || '';
       const r = await post('/api/importer', {racine:b.dataset.importer, nom}); attenteSid = r.sid; delete sdNoms[b.dataset.importer]; charger();
     } else if(b.dataset.reanalyser){
-      if(!confirm('Refaire l\'analyse avec les réglages actuels ? Tes décisions sur cette sortie seront réinitialisées.')) return;
+      if(!confirm('Refaire l\'analyse avec les réglages actuels ? Tes choix faits à la main sont gardés.')) return;
       const r = await post('/api/reanalyser', {sid:b.dataset.reanalyser}); attenteSid = r.sid; charger();
     } else if(b.dataset.retirer){
       if(!confirm('Retirer cette sortie de la liste ? Les photos ne sont pas touchées.')) return;

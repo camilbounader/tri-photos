@@ -360,7 +360,7 @@ function panneau(p){
       <dt>Prise</dt><dd>${fmtJ(p.date)} à ${new Date(p.date*1000).toLocaleTimeString('fr-FR')}</dd>
       <dt>Moment</dt><dd>${p.moment+1} · série ${p.serie+1} (${A.series[p.serie].length} photo${A.series[p.serie].length>1?'s':''})</dd>
       <dt>Note</dt><dd>${p.note<0?'—':Math.round(p.note)+' / 100'}${p.note_esthetique!=null?` · IA ${p.note_esthetique.toFixed(1)}/10`:''}</dd>
-      <dt>Netteté</dt><dd>${Math.round(p.nettete)} (seuil ${Math.round(A.seuil_flou)})</dd>
+      <dt>Netteté</dt><dd>${p.nettete.toFixed(1)} (seuil ${Number(A.seuil_flou).toFixed(1)} · net ≈ 25-35)</dd>
       ${p.modele?`<dt>Appareil</dt><dd>${esc(p.modele)}</dd>`:''}
       ${tech?`<dt>Réglages</dt><dd>${esc(tech)}</dd>`:''}
       <dt>Fichiers</dt><dd>${[p.raw,p.jpg].filter(Boolean).map(f=>esc(f.split(/[\\/]/).pop())).join(' + ')}</dd>

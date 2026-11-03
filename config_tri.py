@@ -77,12 +77,11 @@ def fichier_reglages() -> Path:
 # Chaque réglage : clé -> (défaut, libellé, explication, min, max, pas, groupe)
 # ---------------------------------------------------------------------------
 SCHEMA = {
-    "seuil_flou": (20.0, "Sévérité du flou",
-                   "Plus la valeur est haute, plus l'outil rejette de photos jugées floues.",
-                   5, 80, 1, "Tri"),
-    "part_mediane_flou": (0.25, "Flou relatif à la sortie",
-                          "Une photo est aussi jugée floue si elle est beaucoup moins nette que la moyenne "
-                          "de la sortie (0,25 = 4 fois moins nette).", 0.05, 0.6, 0.05, "Tri"),
+    "seuil_nettete": (16.5, "Sévérité du flou",
+                      "Une photo est proposée à la suppression si sa netteté est en dessous de cette valeur. "
+                      "16,5 = flou bien visible ; 19 = rejette aussi le léger flou ; 14 = seulement le très flou. "
+                      "La mesure ne dépend pas de la luminosité : une photo sombre n'est pas comptée floue.",
+                      12, 24, 0.5, "Tri"),
     "seuil_noire": (0.025, "Photo noire",
                     "Luminosité en dessous de laquelle une photo est considérée comme noire (ratée).",
                     0.005, 0.08, 0.005, "Tri"),

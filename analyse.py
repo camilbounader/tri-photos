@@ -40,7 +40,7 @@ EXT_RAW = {".nef", ".nrw", ".cr2", ".cr3", ".crw", ".arw", ".srf", ".sr2", ".raf
 EXT_JPG = {".jpg", ".jpeg"}
 TAILLE_APERCU = 1200    # côté long pour les mesures
 TAILLE_MINIATURE = 640  # côté long des vignettes de la grille (et pour l'IA)
-VERSION_ANALYSE = 3
+VERSION_ANALYSE = 4
 
 
 # ---------------------------------------------------------------------------
@@ -181,17 +181,35 @@ def charger_apercu(entree, orientation_exif):
 # Mesures
 # ---------------------------------------------------------------------------
 def nettete(gris: np.ndarray) -> float:
-    """Variance du Laplacien sur les zones les plus nettes (le sujet).
-    L'image est normalisée pour qu'une photo sombre ne passe pas pour floue."""
-    g = gris.astype(np.float32)
-    bas, haut = np.percentile(g, (1, 99))
-    if haut - bas > 4:
-        g = np.clip((g - bas) * (255.0 / (haut - bas)), 0, 255)
-    lap = cv2.Laplacian(g.astype(np.float32), cv2.CV_32F)
-    h, w = gris.shape
-    vals = sorted((float(lap[i * h // 4:(i + 1) * h // 4, j * w // 4:(j + 1) * w // 4].var())
-                   for i in range(4) for j in range(4)), reverse=True)
-    return float(np.mean(vals[:3]))
+    """Netteté des contours, indépendante du contraste et de la luminosité.
+
+    Pour les contours les plus marqués, on compare la pente du contour à sa
+    hauteur : un contour net passe du clair au sombre en 1-2 pixels, un contour
+    flou s'étale. Une photo sombre ou douce (coucher de soleil, ciel, brume)
+    n'est donc plus prise pour une photo floue. Mesuré séparément à
+    l'horizontale et à la verticale pour repérer aussi le flou de bougé.
+    Échelle (aperçu de 1200 px) : ~25-35 = net, ~19 = léger flou, <16 = flou."""
+    g = gris.astype(np.float32) / 255.0
+    g = cv2.GaussianBlur(g, (0, 0), 0.7)  # le grain ne compte pas comme du détail
+    mesures = []
+    for dx, dy, fen in ((1, 0, (9, 1)), (0, 1, (1, 9))):
+        pente = np.abs(cv2.Sobel(g, cv2.CV_32F, dx, dy, ksize=3)) / 8.0
+        noyau = np.ones((fen[1], fen[0]), np.uint8)
+        hauteur = cv2.dilate(g, noyau) - cv2.erode(g, noyau)
+        contours = hauteur > 0.05
+        if contours.sum() < 200:
+            mesures.append((0.0, 0.0))
+            continue
+        pc, hc = pente[contours], hauteur[contours]
+        forts = pc >= np.percentile(pc, 97)
+        mesures.append((float(np.median(pc[forts] / (hc[forts] + 1e-4))) * 100,
+                        float(np.percentile(pc, 99))))
+    (sx, fx), (sy, fy) = mesures
+    if fx == 0 and fy == 0:
+        return 0.0
+    if fx >= 0.35 * fy and fy >= 0.35 * fx:
+        return min(sx, sy)  # contours dans les deux sens : le plus flou des deux (bougé)
+    return sx if fx > fy else sy
 
 
 def empreinte_visuelle(gris: np.ndarray) -> list:
@@ -251,16 +269,20 @@ def analyser(entree, dossier_miniatures):
 # Diagnostic, regroupement, notation, sélection
 # ---------------------------------------------------------------------------
 def diagnostiquer(photos):
-    med = float(np.median([p["nettete"] for p in photos])) if photos else 0
-    seuil_flou = max(CONFIG["seuil_flou"], CONFIG["part_mediane_flou"] * med)
+    seuil_flou = CONFIG["seuil_nettete"]
+    leger = seuil_flou + 3
     for p in photos:
         rejets, badges = [], []
         if p["luminosite"] < CONFIG["seuil_noire"] and p["p99"] < 0.10:
             rejets.append(("noire", f"Photo quasiment noire (luminosité {p['luminosite']:.0%})."))
         elif p["luminosite"] < 0.15:
             badges.append("sombre, rattrapable" if p["raw"] else "sombre")
-        if p["nettete"] < seuil_flou and not rejets:
-            rejets.append(("floue", f"Floue : netteté {p['nettete']:.0f}, seuil {seuil_flou:.0f}."))
+        if not rejets:
+            if p["nettete"] < seuil_flou:
+                rejets.append(("floue", f"Floue : netteté {p['nettete']:.1f} (en dessous de {seuil_flou:.1f}). "
+                                        f"Vérifie avec le zoom 100 % (touche Z)."))
+            elif p["nettete"] < leger:
+                badges.append("légèrement floue")
         if p["part_blanc"] > CONFIG["seuil_cramee_apercu"]:
             if p["capteur_sature"] is not None:
                 if p["capteur_sature"] > CONFIG["seuil_cramee_capteur"]:

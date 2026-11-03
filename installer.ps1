@@ -125,8 +125,22 @@ if (-not $gpu) {
 $torchOk = $false
 try { & $PyVenv -c "import torch" 2>$null; $torchOk = ($LASTEXITCODE -eq 0) } catch {}
 if (-not $torchOk) { Write-Host "PyTorch n'a pas pu etre installe." -ForegroundColor Yellow }
-& $PyVenv -m pip install open_clip_torch --disable-pip-version-check --prefer-binary
-$iaOk = ($LASTEXITCODE -eq 0)
+# PyYAML : il faut une version precompilee (pas de compilateur C++ sur la plupart des PC)
+& $PyVenv -m pip install pyyaml --only-binary=:all: --disable-pip-version-check
+$yamlOk = ($LASTEXITCODE -eq 0)
+if ($yamlOk) {
+    & $PyVenv -m pip install open_clip_torch --disable-pip-version-check --prefer-binary
+    $iaOk = ($LASTEXITCODE -eq 0)
+} else {
+    Write-Host "Pas de PyYAML precompile pour ce PC : installation sans PyYAML (non necessaire a Tri Photos)." -ForegroundColor Yellow
+    & $PyVenv -m pip install --no-deps open_clip_torch timm huggingface_hub --disable-pip-version-check --prefer-binary
+    & $PyVenv -m pip install regex ftfy tqdm safetensors filelock fsspec packaging requests typing_extensions wcwidth --only-binary=:all: --disable-pip-version-check
+    $sp = (& $PyVenv -c "import sysconfig;print(sysconfig.get_paths()['purelib'])").Trim()
+    New-Item -ItemType Directory -Force -Path (Join-Path $sp 'yaml') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $DirApp 'outils\yaml_minimal.py') -Destination (Join-Path $sp 'yaml\__init__.py') -Force
+    $iaOk = $false
+    try { & $PyVenv -c "import open_clip" 2>$null; $iaOk = ($LASTEXITCODE -eq 0) } catch {}
+}
 if (-not $iaOk) { Write-Host "L'IA n'a pas pu etre installee : l'appli marchera sans (tri sur criteres techniques)." -ForegroundColor Yellow }
 
 # --- 5. Modeles d'IA ---------------------------------------------------------------
