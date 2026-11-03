@@ -40,7 +40,7 @@ EXT_RAW = {".nef", ".nrw", ".cr2", ".cr3", ".crw", ".arw", ".srf", ".sr2", ".raf
 EXT_JPG = {".jpg", ".jpeg"}
 TAILLE_APERCU = 1200    # côté long pour les mesures
 TAILLE_MINIATURE = 640  # côté long des vignettes de la grille (et pour l'IA)
-VERSION_ANALYSE = 6
+VERSION_ANALYSE = 7
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +119,15 @@ def lire_exif(chemin: str):
 
 
 def orientation_raw(raw, defaut):
-    """Orientation lue par LibRaw ; si LibRaw n'en trouve pas, celle de l'EXIF."""
+    """Orientation de la photo : celle notée par l'appareil dans l'EXIF en priorité,
+    sinon celle trouvée par LibRaw."""
+    if defaut in (3, 6, 8):
+        return defaut
     try:
         o = {3: 3, 5: 8, 6: 6}.get(int(raw.sizes.flip), 0)
     except Exception:
         o = 0
-    return o or defaut or 1
+    return o or 1
 
 
 def appliquer_orientation(img: np.ndarray, orientation: int) -> np.ndarray:
@@ -149,7 +152,8 @@ def image_integree(raw, orientation):
     """Aperçu JPEG intégré au RAW (souvent en pleine taille sur les Nikon récents)."""
     vignette = raw.extract_thumb()
     if vignette.format == rawpy.ThumbFormat.JPEG:
-        bgr = cv2.imdecode(np.frombuffer(vignette.data, np.uint8), cv2.IMREAD_COLOR)
+        # on ignore l'orientation éventuelle de l'aperçu : c'est nous qui tournons la photo
+        bgr = cv2.imdecode(np.frombuffer(vignette.data, np.uint8), cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
         if bgr is None:
             return None
         img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)

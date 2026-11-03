@@ -7,32 +7,34 @@
 <link rel="icon" href="data:,">
 <style>
 :root{
-  --fond:#111110;--fond2:#1a1a18;--carte:#22211f;--ligne:#33322e;--txt:#f1efe9;--doux:#a19e94;--faible:#6f6c64;
-  --vert:#3fae6a;--vert-f:#173a26;--rouge:#e0573f;--rouge-f:#3d1a14;--ambre:#e2a93b;--ambre-f:#3a2c10;--bleu:#6aa3e8;
+  --fond:#0e1318;--fond2:#141b22;--carte:#1a232c;--ligne:#2a3642;--txt:#eef2f4;--doux:#9aa8b3;--faible:#66737e;
+  --vert:#3f9a6e;--vert-f:#13291f;--rouge:#e0573f;--rouge-f:#35160f;--ambre:#f0894a;--ambre-f:#33200f;--bleu:#8cc0e0;
   --rayon:12px;--hauteur:220px;
+  --titre:"Bahnschrift","Barlow Condensed","Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--fond);color:var(--txt);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit;cursor:pointer}
-.btn{text-decoration:none;display:inline-block;background:var(--carte);border:1px solid var(--ligne);border-radius:999px;padding:7px 14px;white-space:nowrap}
+a.btn{color:inherit}
+.btn{text-decoration:none;display:inline-block;background:var(--carte);border:1px solid var(--ligne);border-radius:10px;padding:7px 14px;white-space:nowrap}
 .btn:hover{border-color:var(--doux)} .btn.on{background:var(--txt);color:var(--fond);border-color:var(--txt)}
 .btn.principal{background:var(--vert);border-color:var(--vert);color:#fff;font-weight:600}
 .btn.danger{border-color:var(--rouge);color:var(--rouge)}
 .n{opacity:.7;font-variant-numeric:tabular-nums;margin-left:4px}
 
 /* En-tête */
-header{padding:22px clamp(16px,3vw,40px) 10px;display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end;justify-content:space-between}
-h1{margin:0;font-size:clamp(22px,3vw,30px);letter-spacing:-.01em}
+header{background:linear-gradient(180deg,#121c27,#0e1318);padding:22px clamp(16px,3vw,40px) 14px;display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end;justify-content:space-between}
+h1{margin:0;font-family:var(--titre);font-weight:700;font-size:clamp(24px,3.2vw,34px);letter-spacing:.04em;text-transform:uppercase}
 .sous{color:var(--doux);margin-top:4px;font-size:14px}
 .compteurs{display:flex;gap:8px;flex-wrap:wrap}
 .compteur{background:var(--fond2);border:1px solid var(--ligne);border-radius:10px;padding:8px 12px;min-width:92px}
-.compteur b{display:block;font-size:22px;font-variant-numeric:tabular-nums;line-height:1.1}
+.compteur b{display:block;font-family:var(--titre);font-size:24px;font-variant-numeric:tabular-nums;line-height:1.1}
 .compteur span{font-size:12px;color:var(--doux)}
 .compteur.v b{color:var(--vert)} .compteur.r b{color:var(--rouge)}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
 
 /* Barre d'outils */
-nav{position:sticky;top:0;z-index:20;background:rgba(17,17,16,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--ligne);
+nav{position:sticky;top:0;z-index:20;background:rgba(14,19,24,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--ligne);
   padding:10px clamp(16px,3vw,40px);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 nav .sep{flex:1}
 nav label{display:flex;align-items:center;gap:8px;color:var(--doux);font-size:14px}
@@ -42,7 +44,8 @@ nav input[type=range]{width:110px;accent-color:var(--txt)}
 main{padding:0 clamp(16px,3vw,40px) 80px}
 .moment{margin-top:34px}
 .titre-moment{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--ligne)}
-.titre-moment h2{margin:0;font-size:clamp(20px,2.4vw,26px);letter-spacing:-.01em}
+.titre-moment h2{margin:0;font-family:var(--titre);font-weight:700;font-size:clamp(20px,2.4vw,26px);letter-spacing:.05em;text-transform:uppercase}
+.titre-moment .quand{font-family:var(--titre);letter-spacing:.08em;color:#ffb27f!important}
 .titre-moment .quand{color:var(--doux);font-size:15px}
 .titre-moment .info{color:var(--faible);font-size:13px}
 .vide{color:var(--doux);padding:60px 0;text-align:center}

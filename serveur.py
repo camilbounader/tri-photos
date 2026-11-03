@@ -98,7 +98,41 @@ def diagnostic():
             return "\n".join((config_tri.DONNEES / nom).read_text(encoding="utf-8", errors="replace").splitlines()[-n:])
         except Exception:
             return "(vide)"
-    return {"infos": infos, "erreurs": fin("erreurs.log", 80), "installation_ia": fin("installation_ia.log", 40)}
+    return {"infos": infos, "erreurs": fin("erreurs.log", 80), "installation_ia": fin("installation_ia.log", 40),
+            "orientation": diagnostic_orientation()}
+
+
+def diagnostic_orientation(nb=25):
+    """Pour la dernière sortie : ce que disent l'EXIF et LibRaw de l'orientation de chaque photo."""
+    biblio = lire_json(config_tri.DONNEES / "bibliotheque.json", [])
+    if not biblio:
+        return []
+    s = max(biblio, key=lambda x: x.get("ajoute", 0))
+    a = lire_json(Path(s["dossier"]) / "_TRI" / "analyse.json", {})
+    lignes = []
+    for p in a.get("photos", [])[:nb]:
+        l = {"photo": p["id"], "taille": f"{p.get('largeur')}x{p.get('hauteur')}",
+             "rotation_appli": p.get("rotation", 0), "orientation_retenue": p.get("orientation_appareil")}
+        for cle in ("raw", "jpg"):
+            f = p.get(cle)
+            if f and os.path.exists(f):
+                try:
+                    l[f"exif_{cle}"] = analyse.lire_exif(f)["orientation"]
+                except Exception as exc:
+                    l[f"exif_{cle}"] = f"erreur {exc}"
+        if p.get("raw") and analyse.rawpy is not None and os.path.exists(p["raw"]):
+            try:
+                with analyse.rawpy.imread(p["raw"]) as raw:
+                    l["libraw_flip"] = int(raw.sizes.flip)
+                    try:
+                        t = raw.extract_thumb()
+                        l["apercu_integre"] = "jpeg" if t.format == analyse.rawpy.ThumbFormat.JPEG else "bitmap"
+                    except Exception as exc:
+                        l["apercu_integre"] = f"aucun ({type(exc).__name__})"
+            except Exception as exc:
+                l["libraw_flip"] = f"erreur {exc}"
+        lignes.append(l)
+    return lignes
 
 
 def ouvrir_dossier(chemin: Path):

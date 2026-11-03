@@ -121,8 +121,14 @@ def charger_lineaire(p, demi_taille=False, taille_max=None):
                 use_camera_wb=True, output_bps=16, gamma=(1, 1), no_auto_bright=True,
                 highlight_mode=rawpy.HighlightMode.Blend, output_color=rawpy.ColorSpace.sRGB,
                 half_size=demi_taille)
-        if not flip_libraw and p.get("orientation_appareil", 1) in (3, 6, 8):
-            rgb16 = appliquer_orientation(rgb16, p["orientation_appareil"])  # orientation lue dans l'EXIF
+        o_lib = {3: 3, 5: 8, 6: 6}.get(flip_libraw, 1)
+        o_voulue = p.get("orientation_appareil", o_lib) or 1
+        if o_voulue != o_lib:
+            # LibRaw a tourné selon sa propre lecture : on défait puis on applique celle de l'appareil
+            defaire = {6: 8, 8: 6, 3: 3}.get(o_lib)
+            if defaire:
+                rgb16 = appliquer_orientation(rgb16, defaire)
+            rgb16 = appliquer_orientation(rgb16, o_voulue)
         if taille_max:
             rgb16 = redimensionner(rgb16, taille_max)
         lin, est_raw = rgb16.astype(np.float32) / 65535.0, True
