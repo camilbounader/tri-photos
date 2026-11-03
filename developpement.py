@@ -113,10 +113,16 @@ def charger_lineaire(p, demi_taille=False, taille_max=None):
     """Renvoie (image linéaire float32 remise à l'endroit, est_raw)."""
     if p.get("raw") and rawpy is not None:
         with rawpy.imread(p["raw"]) as raw:
+            try:
+                flip_libraw = int(raw.sizes.flip)
+            except Exception:
+                flip_libraw = 0
             rgb16 = raw.postprocess(
                 use_camera_wb=True, output_bps=16, gamma=(1, 1), no_auto_bright=True,
                 highlight_mode=rawpy.HighlightMode.Blend, output_color=rawpy.ColorSpace.sRGB,
                 half_size=demi_taille)
+        if not flip_libraw and p.get("orientation_appareil", 1) in (3, 6, 8):
+            rgb16 = appliquer_orientation(rgb16, p["orientation_appareil"])  # orientation lue dans l'EXIF
         if taille_max:
             rgb16 = redimensionner(rgb16, taille_max)
         lin, est_raw = rgb16.astype(np.float32) / 65535.0, True
@@ -134,52 +140,195 @@ def charger_lineaire(p, demi_taille=False, taille_max=None):
 # ---------------------------------------------------------------------------
 # Récupération des photos cramées (réglages choisis à la main)
 # ---------------------------------------------------------------------------
-REGLAGES_RECUP_DEFAUT = {"ev": 0.0, "hl": 60, "bl": 0, "om": 30}
+# Curseurs de retouche : clé -> (valeur neutre, minimum, maximum)
+CURSEURS = {
+    "ev": (0.0, -4.0, 4.0),     # exposition (IL)
+    "ct": (0, -100, 100),       # contraste
+    "hl": (0, 0, 100),          # hautes lumières : assombrit localement ce qui est trop clair
+    "om": (0, 0, 100),          # ombres : éclaircit localement ce qui est trop sombre
+    "bl": (0, -100, 100),       # blancs
+    "nr": (0, -100, 100),       # noirs
+    "te": (0, -100, 100),       # température (bleu <-> jaune)
+    "ti": (0, -100, 100),       # teinte (vert <-> magenta)
+    "vi": (0, -100, 100),       # vibrance
+    "sa": (0, -100, 100),       # saturation
+    "cl": (0, -100, 100),       # clarté (relief des tons moyens)
+    "ne": (0, 0, 100),          # netteté
+    "an": (0.0, -15.0, 15.0),   # redresser (degrés, positif = sens des aiguilles d'une montre)
+}
+REGLAGES_DEFAUT = dict({k: v[0] for k, v in CURSEURS.items()}, crop=None)
+REGLAGES_RECUP_DEFAUT = REGLAGES_DEFAUT  # ancien nom
+
+
+def nettoyer_reglages(r):
+    """Réglages complets et dans les bornes (les clés absentes prennent la valeur neutre)."""
+    r = r or {}
+    propre = {}
+    for k, (neutre, mn, mx) in CURSEURS.items():
+        try:
+            propre[k] = float(min(max(float(r.get(k, neutre)), mn), mx))
+        except (TypeError, ValueError):
+            propre[k] = float(neutre)
+    c = r.get("crop")
+    try:
+        x, y, w, h = [float(v) for v in c]
+        x, y = min(max(x, 0.0), 0.95), min(max(y, 0.0), 0.95)
+        w, h = min(max(w, 0.05), 1 - x), min(max(h, 0.05), 1 - y)
+        propre["crop"] = None if (w > 0.999 and h > 0.999) else [round(x, 5), round(y, 5), round(w, 5), round(h, 5)]
+    except (TypeError, ValueError):
+        propre["crop"] = None
+    return propre
+
+
+def _cle(lin):
+    lum = 0.2126 * lin[::4, ::4, 0] + 0.7152 * lin[::4, ::4, 1] + 0.0722 * lin[::4, ::4, 2]
+    return float(np.exp(np.mean(np.log(lum + 1e-4))))
 
 
 def reglages_auto(lin):
-    """Réglages de départ pour récupérer une photo trop claire (ou trop sombre)."""
-    lum = 0.2126 * lin[::4, ::4, 0] + 0.7152 * lin[::4, ::4, 1] + 0.0722 * lin[::4, ::4, 2]
-    cle = float(np.exp(np.mean(np.log(lum + 1e-4))))
-    ev = float(np.clip(np.log2(0.16 / max(cle, 1e-4)), -3.0, 1.5))
-    return {"ev": round(ev * 4) / 4, "hl": 75, "bl": -20, "om": 35}
+    """Point de départ équilibré (comme la retouche automatique)."""
+    ev = float(np.clip(0.7 * np.log2(0.18 / max(_cle(lin), 1e-4)), -2.5, 2.0))
+    return nettoyer_reglages({"ev": round(ev * 4) / 4, "hl": 35, "om": 25, "ct": 10, "cl": 20, "vi": 15})
 
 
-def developper_reglages(lin, est_raw, r):
-    """Développement avec les curseurs de l'outil « Récupérer » :
-    ev = exposition (IL), hl = récupération des hautes lumières (0-100),
-    bl = blancs (-100 à 100), om = ombres débouchées (0-100)."""
-    ev = float(r.get("ev", 0)); hl = float(r.get("hl", 60)); bl = float(r.get("bl", 0)); om = float(r.get("om", 30))
-    x = lin * (2.0 ** ev)
-    y = courbe_hautes_lumieres(x, seuil=0.95 - 0.65 * np.clip(hl, 0, 100) / 100)
+def reglages_recuperation(lin):
+    """Préréglage pour une photo trop claire ou cramée : on « gomme » les extrêmes."""
+    ev = float(np.clip(np.log2(0.14 / max(_cle(lin), 1e-4)), -3.0, 0.5))
+    return nettoyer_reglages({"ev": round(ev * 4) / 4, "hl": 90, "om": 35, "bl": -25, "ct": 5, "cl": 25, "vi": 10})
+
+
+def _base_lissee(log_l):
+    """Version lissée de la luminance (en log) qui respecte les contours : sert à
+    éclaircir ou assombrir des zones entières sans écraser les détails."""
+    h, w = log_l.shape
+    f = min(1.0, 512.0 / max(h, w))
+    petit = cv2.resize(log_l, (max(1, round(w * f)), max(1, round(h * f))), interpolation=cv2.INTER_AREA)
+    petit = cv2.bilateralFilter(petit.astype(np.float32), 9, 1.2, 8)
+    petit = cv2.GaussianBlur(petit, (0, 0), 1.0)
+    return cv2.resize(petit, (w, h), interpolation=cv2.INTER_LINEAR)
+
+
+def _douce(z, k=3.0):
+    return np.log1p(np.exp(np.clip(k * z, -30, 30))) / k
+
+
+def geometrie(img, r, interpolation=cv2.INTER_LANCZOS4):
+    """Redresser (rotation fine) puis rogner."""
+    a = r.get("an", 0)
+    if a:
+        H, W = img.shape[:2]
+        rad = abs(a) * np.pi / 180
+        k = np.cos(rad) + np.sin(rad) * max(W / H, H / W)  # zoom pour ne pas voir de coins vides
+        M = cv2.getRotationMatrix2D((W / 2, H / 2), -a, k)
+        img = cv2.warpAffine(img, M, (W, H), flags=interpolation, borderMode=cv2.BORDER_REFLECT)
+    c = r.get("crop")
+    if c:
+        H, W = img.shape[:2]
+        x0, y0 = int(round(c[0] * W)), int(round(c[1] * H))
+        x1, y1 = int(round((c[0] + c[2]) * W)), int(round((c[1] + c[3]) * H))
+        img = img[y0:max(y1, y0 + 2), x0:max(x1, x0 + 2)]
+    return np.ascontiguousarray(img)
+
+
+def developper_reglages(lin, est_raw, r, recadrer=True):
+    """Développement avec les réglages de l'outil « Retoucher » (image linéaire -> sRGB uint8)."""
+    r = nettoyer_reglages(r)
+    x = lin.astype(np.float32, copy=True)
+    h, w = x.shape[:2]
+    echelle = max(h, w) / 6000.0
+
+    # Balance des blancs (température / teinte), luminosité conservée
+    te, ti = r["te"] / 100, r["ti"] / 100
+    if te or ti:
+        g = np.array([2 ** (0.35 * te), 2 ** (-0.25 * ti), 2 ** (-0.35 * te)], np.float32)
+        x *= g / (0.2126 * g[0] + 0.7152 * g[1] + 0.0722 * g[2])
+
+    x *= np.float32(2.0 ** r["ev"])
+
+    # Hautes lumières / ombres : corrections locales (détails préservés)
+    hl, om = r["hl"] / 100, r["om"] / 100
+    if hl or om:
+        L = np.maximum(0.2126 * x[..., 0] + 0.7152 * x[..., 1] + 0.0722 * x[..., 2], 1e-5)
+        log_l = np.log2(L)
+        base = _base_lissee(log_l)
+        delta = -hl * 0.8 * _douce(base + 1.6) + om * 0.6 * _douce(-3.2 - base)
+        x *= np.exp2(delta).astype(np.float32)[..., None]
+        del L, log_l, base, delta
+
+    # Épaule douce : les hautes lumières s'arrondissent au lieu d'être coupées net
+    y = courbe_hautes_lumieres(np.maximum(x, 0), seuil=0.75)
+    del x
     srgb = lineaire_vers_srgb(y)
-    w = np.clip(bl, -100, 100) / 100
-    if w:
-        srgb = srgb + 0.35 * w * srgb ** 3  # agit surtout sur les tons les plus clairs
-    if om > 0:
-        ycc = cv2.cvtColor(np.clip(srgb, 0, 1).astype(np.float32), cv2.COLOR_RGB2YCrCb)
-        L = ycc[..., 0]
-        ycc[..., 0] = np.clip(L + (om / 100) * 0.6 * L * (1 - L) ** 3, 0, 1)
+    del y
+
+    # Réduction du bruit couleur (réglage général de l'appli)
+    if CONFIG["reduction_bruit"] > 0:
+        ycc = cv2.cvtColor(srgb, cv2.COLOR_RGB2YCrCb)
+        sg = max(0.8, 2.5 * echelle) * (0.5 + CONFIG["reduction_bruit"])
+        ycc[..., 1] = cv2.GaussianBlur(ycc[..., 1], (0, 0), sg)
+        ycc[..., 2] = cv2.GaussianBlur(ycc[..., 2], (0, 0), sg)
         srgb = cv2.cvtColor(ycc, cv2.COLOR_YCrCb2RGB)
-    if CONFIG["vibrance"] > 0:
+
+    # Blancs, noirs, contraste (sur la luminosité perçue)
+    bl, nr, ct, cl, ne = r["bl"] / 100, r["nr"] / 100, r["ct"] / 100, r["cl"] / 100, r["ne"] / 100
+    if bl or nr or ct or cl or ne:
+        ycc = cv2.cvtColor(np.clip(srgb, 0, 1).astype(np.float32), cv2.COLOR_RGB2YCrCb)
+        Y = ycc[..., 0]
+        Y0 = Y.copy()
+        if bl:
+            Y = Y + 0.30 * bl * Y ** 3
+        if nr:
+            Y = Y + 0.12 * nr * (1 - np.clip(Y, 0, 1)) ** 4
+        if ct:
+            Yc = np.clip(Y, 0, 1)
+            Y = Y + ct * 0.9 * (Yc * Yc * (3 - 2 * Yc) - Yc)
+        if cl:
+            base = flou_rapide(Y, 40 * echelle + 1)
+            poids = 1 - (2 * np.clip(Y, 0, 1) - 1) ** 2
+            Y = Y + cl * 0.7 * (Y - base) * poids
+        if ne:
+            Y = Y + ne * 1.4 * (Y - cv2.GaussianBlur(Y, (0, 0), max(0.7, 1.6 * echelle)))
+        # on applique le changement de luminosité aux trois couleurs
+        gain = (np.clip(Y, 0, 1.2) + 1e-4) / (Y0 + 1e-4)
+        srgb = np.clip(srgb, 0, 1) * np.clip(gain, 0, 4)[..., None]
+        del ycc, Y, Y0, gain
+
+    # Vibrance et saturation
+    vi, sa = r["vi"] / 100, r["sa"] / 100
+    if vi or sa:
         srgb = np.clip(srgb, 0, 1)
+        gris = (0.299 * srgb[..., 0] + 0.587 * srgb[..., 1] + 0.114 * srgb[..., 2])[..., None]
         mx, mn = srgb.max(axis=2), srgb.min(axis=2)
-        sat = (mx - mn) / (mx + 1e-6)
-        gris = srgb.mean(axis=2, keepdims=True)
-        srgb = gris + (srgb - gris) * (1 + CONFIG["vibrance"] * (1 - sat))[..., None]
-    return (np.clip(srgb, 0, 1) * 255 + 0.5).astype(np.uint8)
+        sat = ((mx - mn) / (mx + 1e-6))[..., None]
+        facteur = (1 + sa) * (1 + vi * (1 - sat) * (1.0 if vi > 0 else 0.6))
+        srgb = gris + (srgb - gris) * facteur
+
+    img = (np.clip(srgb, 0, 1) * 255 + 0.5).astype(np.uint8)
+    del srgb
+    if recadrer:
+        return geometrie(img, r)
+    return geometrie(img, dict(r, crop=None))
 
 
-def zones_perdues(lin, img):
+def zones_perdues(lin, img, r=None, recadrer=True):
     """Colore en rouge les zones sans aucune information (blanc pur même dans le RAW)
     et en orange celles où une partie des couleurs est perdue. Renvoie (image, % perdu, % partiel)."""
     sature = lin >= 0.985
     perdu = sature.all(axis=2)
     partiel = sature.any(axis=2) & ~perdu
+    pourcent = (float(perdu.mean() * 100), float(partiel.mean() * 100))
+    masque = (perdu * 2 + partiel).astype(np.uint8)
+    rr = nettoyer_reglages(r)
+    if not recadrer:
+        rr["crop"] = None
+    masque = geometrie(masque, rr, interpolation=cv2.INTER_NEAREST)
+    if masque.shape[:2] != img.shape[:2]:
+        masque = cv2.resize(masque, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
     out = img.astype(np.float32)
-    out[perdu] = out[perdu] * 0.3 + np.array([230, 40, 40]) * 0.7
-    out[partiel] = out[partiel] * 0.55 + np.array([255, 150, 30]) * 0.45
-    return out.astype(np.uint8), float(perdu.mean() * 100), float(partiel.mean() * 100)
+    m2, m1 = masque == 2, masque == 1
+    out[m2] = out[m2] * 0.3 + np.array([230, 40, 40]) * 0.7
+    out[m1] = out[m1] * 0.55 + np.array([255, 150, 30]) * 0.45
+    return out.astype(np.uint8), pourcent[0], pourcent[1]
 
 
 def developper_photo(p, lin, est_raw):
@@ -206,7 +355,7 @@ def apercu_original(p, chemin_cache):
     elif p.get("raw") and rawpy is not None:
         with rawpy.imread(p["raw"]) as raw:
             try:
-                img = image_integree(raw, orientation_raw(raw, 1))
+                img = image_integree(raw, orientation_raw(raw, p.get("orientation_appareil", 1)))
             except Exception:
                 img = None
             if img is None or max(img.shape[:2]) < 2400:  # aperçu intégré trop petit
@@ -329,6 +478,16 @@ def exporter_meilleure(p, dossier_meilleures, dossiers_formats):
         sauver_jpeg(recadrer(img, sal, largeur, hauteur), os.path.join(dossier, nom), exif)
         crees.append(fmt)
     return p["id"], crees
+
+
+def exporter_copie_retouchee(p, dossier):
+    """Copie JPEG pleine résolution avec les réglages de l'outil « Retoucher »."""
+    lin, est_raw = charger_lineaire(p)
+    img = developper_photo(p, lin, est_raw)
+    del lin
+    chemin = os.path.join(dossier, p["id"] + "_retouche.jpg")
+    sauver_jpeg(img, chemin, exif_pour_export(p))
+    return chemin
 
 
 def exporter_retouchee_simple(p, dossier):

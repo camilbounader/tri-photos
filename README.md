@@ -6,7 +6,8 @@ aucune photo n'est envoyée sur internet, et ça marche hors connexion une fois 
 - Importe la carte SD, repère les photos **floues, noires ou cramées sans espoir** (en lisant les vraies données du capteur RAW)
 - Regroupe les **rafales et photos similaires**, propose les **meilleures** (IA locale : note esthétique + variété des scènes)
 - Diaporama en pleine qualité pour valider en quelques touches : **S** meilleure · **G** garder · **X** supprimer
-- **Récupérer** une photo cramée en un clic (touche **H**) : exposition, hautes lumières, blancs et ombres développés depuis le RAW, avec les zones définitivement perdues en rouge
+- **Retoucher** (touche **E**) : exposition, contraste, hautes lumières, ombres, blancs, noirs, température, teinte, vibrance, saturation, clarté, netteté, redresser et rogner (formats 16:9, 4:5, 1:1…), développés depuis le RAW ; bouton « Récupérer le cramé » et zones perdues en rouge ; copie JPEG pleine résolution dans `_TRI\retouches`
+- **Photos similaires** : bandeau dans la visionneuse et touches **↑ ↓** pour comparer les doublons
 - Photos couchées **redressées automatiquement** quand l'appareil n'a pas noté l'orientation, et boutons ⟲ ⟳ (touche **P**)
 - **Sélection multiple** (clic, Maj+clic, tout un moment) puis **Envoyer sur Google Photos** : un dossier avec seulement ces photos, et Google Photos s'ouvre pour les y glisser
 - Export : meilleures en **RAW original + JPEG retouché**, fonds d'écran PC et téléphone, Instagram, et un dossier prêt pour **Google Photos** avec seulement les photos gardées

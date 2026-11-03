@@ -133,7 +133,11 @@ class Session:
         self.envoi = {"etat": "repos", "fait": 0, "total": 0, "message": ""}
         self.fichier_recup = self.sortie / "recuperation.json"
         self.recup = {k: v for k, v in lire_json(self.fichier_recup, {}).items() if k in self.photos}
-        self.lin_cache = OrderedDict()  # images RAW développées en mémoire pour l'outil « Récupérer »
+        self.lin_cache = OrderedDict()  # images RAW développées en mémoire pour l'outil « Retoucher »
+        self.copies = {}  # copies JPEG retouchées : pid -> état
+        self.actif = True
+        # identifiant de l'analyse (change à chaque réanalyse)
+        self.jeton = hashlib.sha1(str(self.analyse.get("date_analyse", "")).encode()).hexdigest()[:6]
         (self.sortie / "cache" / "original").mkdir(parents=True, exist_ok=True)
         (self.sortie / "cache" / "retouche").mkdir(parents=True, exist_ok=True)
         self.sauver_decisions()
@@ -148,7 +152,8 @@ class Session:
 
     def oublier_rendus(self, pid):
         for type_ in ("original", "retouche"):
-            (self.sortie / "cache" / type_ / (pid + ".jpg")).unlink(missing_ok=True)
+            for f in (self.sortie / "cache" / type_).glob(f"{pid}_r*.jpg"):
+                f.unlink(missing_ok=True)
         self.lin_cache.pop(pid, None)
 
     # --- Rotation ------------------------------------------------------------------
@@ -180,12 +185,12 @@ class Session:
                 self.lin_cache.popitem(last=False)
         return donnees
 
-    def rendu_recup(self, pid, reglages, zones):
+    def rendu_recup(self, pid, reglages, zones, recadrer=True):
         lin, est_raw = self.base_recup(pid)
-        img = developpement.developper_reglages(lin, est_raw, reglages)
+        img = developpement.developper_reglages(lin, est_raw, reglages, recadrer=recadrer)
         perdu = partiel = None
         if zones:
-            img, perdu, partiel = developpement.zones_perdues(lin, img)
+            img, perdu, partiel = developpement.zones_perdues(lin, img, reglages, recadrer=recadrer)
         tampon = io.BytesIO()
         Image.fromarray(img).save(tampon, "JPEG", quality=90)
         return tampon.getvalue(), perdu, partiel
@@ -193,19 +198,41 @@ class Session:
     def infos_recup(self, pid):
         lin, est_raw = self.base_recup(pid)
         sature = lin >= 0.985
-        return {"auto": developpement.reglages_auto(lin), "enregistres": self.recup.get(pid),
-                "defaut": developpement.REGLAGES_RECUP_DEFAUT, "est_raw": est_raw,
+        return {"auto": developpement.reglages_auto(lin), "recuperation": developpement.reglages_recuperation(lin),
+                "enregistres": developpement.nettoyer_reglages(self.recup[pid]) if pid in self.recup else None,
+                "defaut": developpement.REGLAGES_DEFAUT, "curseurs": developpement.CURSEURS, "est_raw": est_raw,
+                "largeur": int(lin.shape[1]), "hauteur": int(lin.shape[0]),
+                "copie": self.copies.get(pid),
                 "perdu": round(float(sature.all(axis=2).mean() * 100), 1),
                 "partiel": round(float((sature.any(axis=2) & ~sature.all(axis=2)).mean() * 100), 1),
                 "capteur": self.photos[pid].get("capteur_sature")}
 
     def sauver_recup(self, pid, reglages):
         if reglages:
-            self.recup[pid] = {k: float(reglages.get(k, v)) for k, v in developpement.REGLAGES_RECUP_DEFAUT.items()}
+            self.recup[pid] = developpement.nettoyer_reglages(reglages)
         else:
             self.recup.pop(pid, None)
         ecrire_json(self.fichier_recup, self.recup)
-        (self.sortie / "cache" / "retouche" / (pid + ".jpg")).unlink(missing_ok=True)
+        for f in (self.sortie / "cache" / "retouche").glob(f"{pid}_r*.jpg"):
+            f.unlink(missing_ok=True)
+
+    def enregistrer_copie(self, pid):
+        """Copie JPEG pleine résolution avec les réglages de retouche, dans _TRI/retouches."""
+        if (self.copies.get(pid) or {}).get("etat") == "en cours":
+            return self.copies[pid]
+        self.copies[pid] = {"etat": "en cours"}
+
+        def travail():
+            try:
+                d = self.sortie / "retouches"
+                d.mkdir(exist_ok=True)
+                chemin = developpement.exporter_copie_retouchee(self.photo(pid), str(d))
+                self.copies[pid] = {"etat": "termine", "chemin": chemin}
+            except Exception as exc:
+                noter_erreur(f"Copie retouchée de {pid}\n{traceback.format_exc()}")
+                self.copies[pid] = {"etat": "erreur", "message": str(exc)}
+        threading.Thread(target=travail, daemon=True).start()
+        return self.copies[pid]
 
     # --- Envoi d'une sélection vers Google Photos ---------------------------------------
     def preparer_envoi(self, ids, mode, ouvrir=True):
@@ -272,7 +299,8 @@ class Session:
     # --- Rendus haute qualité -------------------------------------------------
     def rendu(self, pid, type_):
         p = self.photo(pid)
-        chemin = str(self.sortie / "cache" / type_ / (pid + ".jpg"))
+        # le nom du fichier en cache dépend de la rotation et de l'analyse : jamais d'image périmée
+        chemin = str(self.sortie / "cache" / type_ / f"{pid}_r{p.get('rotation', 0)}_{self.jeton}.jpg")
         if os.path.exists(chemin):
             return chemin
         with self.verrou:
@@ -287,6 +315,8 @@ class Session:
         ordre = sorted(self.photos, key=lambda i: (self.decisions[i] != "meilleure",
                                                    self.photos[i]["suggestion"] == "rejet"))
         for pid in ordre:
+            if not self.actif:
+                return  # sortie fermée ou en cours de réanalyse
             try:
                 self.rendu(pid, "original")
             except Exception:
@@ -600,7 +630,9 @@ class Appli:
     def retirer(self, sid):
         with self.verrou:
             ecrire_json(self.fichier_biblio, [s for s in self.biblio() if s["sid"] != sid])
-        self.sessions.pop(sid, None)
+        ancienne_session = self.sessions.pop(sid, None)
+        if ancienne_session:
+            ancienne_session.actif = False
 
     def session(self, sid) -> Session:
         if sid not in self.sessions:
@@ -643,7 +675,9 @@ class Appli:
     def _analyser(self, dossier: Path, reanalyser):
         sid = sid_de(dossier)
         try:
-            self.sessions.pop(sid, None)
+            ancienne_session = self.sessions.pop(sid, None)
+            if ancienne_session:
+                ancienne_session.actif = False
             sortie = dossier / "_TRI"
             sortie.mkdir(exist_ok=True)
             # On garde les choix faits à la main ; les autres suivront les nouvelles suggestions
@@ -885,6 +919,8 @@ def creer_gestionnaire(appli: Appli):
                 return self._json(s.export)
             if reste == "envoi":
                 return self._json(s.envoi)
+            if reste.startswith("copie/"):
+                return self._json(s.copies.get(reste.split("/", 1)[1]) or {"etat": "aucune"})
             if reste.startswith("recup_infos/"):
                 pid = reste.split("/", 1)[1]
                 if pid not in s.photos:
@@ -895,8 +931,17 @@ def creer_gestionnaire(appli: Appli):
                 if pid not in s.photos:
                     raise KeyError("photo inconnue")
                 q = parse_qs(urlparse(self.path).query)
-                reglages = {k: float(q.get(k, [v])[0]) for k, v in developpement.REGLAGES_RECUP_DEFAUT.items()}
-                data, perdu, partiel = s.rendu_recup(pid, reglages, q.get("zones", ["0"])[0] == "1")
+                try:
+                    reglages = json.loads(q.get("r", ["{}"])[0])
+                except ValueError:
+                    reglages = {}
+                if not isinstance(reglages, dict):
+                    reglages = {}
+                for k in developpement.CURSEURS:  # ancien format : un paramètre par réglage
+                    if k in q:
+                        reglages[k] = q[k][0]
+                data, perdu, partiel = s.rendu_recup(pid, reglages, q.get("zones", ["0"])[0] == "1",
+                                                     recadrer=q.get("recadrer", ["1"])[0] == "1")
                 entetes = {}
                 if perdu is not None:
                     entetes = {"X-Perdu": f"{perdu:.2f}", "X-Partiel": f"{partiel:.2f}"}
@@ -1019,6 +1064,18 @@ def creer_gestionnaire(appli: Appli):
                     return self._json({"erreur": "photo inconnue"}, 400)
                 s.sauver_recup(pid, corps.get("reglages"))
                 return self._json({"ok": True, "recup": s.recup})
+            if action == "copie":
+                pid = corps.get("id")
+                if pid not in s.photos:
+                    return self._json({"erreur": "photo inconnue"}, 400)
+                if corps.get("reglages"):
+                    s.sauver_recup(pid, corps["reglages"])
+                return self._json(s.enregistrer_copie(pid))
+            if action == "ouvrir_retouches":
+                d = s.sortie / "retouches"
+                d.mkdir(exist_ok=True)
+                ouvrir_dossier(d)
+                return self._json({"ok": True})
             if action == "preparer_envoi":
                 mode = corps.get("mode", "originaux")
                 if mode not in ("originaux", "jpeg_appareil", "retouchees"):

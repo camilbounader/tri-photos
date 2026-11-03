@@ -40,7 +40,7 @@ EXT_RAW = {".nef", ".nrw", ".cr2", ".cr3", ".crw", ".arw", ".srf", ".sr2", ".raf
 EXT_JPG = {".jpg", ".jpeg"}
 TAILLE_APERCU = 1200    # côté long pour les mesures
 TAILLE_MINIATURE = 640  # côté long des vignettes de la grille (et pour l'IA)
-VERSION_ANALYSE = 5
+VERSION_ANALYSE = 6
 
 
 # ---------------------------------------------------------------------------
@@ -119,11 +119,12 @@ def lire_exif(chemin: str):
 
 
 def orientation_raw(raw, defaut):
-    """Orientation lue par LibRaw (plus fiable que l'EXIF pour les RAW)."""
+    """Orientation lue par LibRaw ; si LibRaw n'en trouve pas, celle de l'EXIF."""
     try:
-        return {3: 3, 5: 8, 6: 6}.get(int(raw.sizes.flip), 1)
+        o = {3: 3, 5: 8, 6: 6}.get(int(raw.sizes.flip), 0)
     except Exception:
-        return defaut
+        o = 0
+    return o or defaut or 1
 
 
 def appliquer_orientation(img: np.ndarray, orientation: int) -> np.ndarray:
@@ -189,6 +190,69 @@ def tourner(img: np.ndarray, degres: int) -> np.ndarray:
     if degres == 270:
         return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
     return img
+
+
+URL_VISAGES = "https://raw.githubusercontent.com/opencv/opencv/4.x/data/haarcascades/haarcascade_frontalface_default.xml"
+_DETECTEUR = {}
+
+
+def fichier_visages():
+    """Modèle de détection des visages (fourni avec OpenCV, ou téléchargé une fois)."""
+    try:
+        f = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+        if os.path.exists(f):
+            return f
+    except Exception:
+        pass
+    f = config_tri.DONNEES / "modeles" / "haarcascade_frontalface_default.xml"
+    return str(f) if f.exists() else None
+
+
+def preparer_visages():
+    """À appeler une fois avant l'analyse : télécharge le modèle s'il manque (si internet)."""
+    if fichier_visages():
+        return True
+    try:
+        import urllib.request
+        f = config_tri.DONNEES / "modeles" / "haarcascade_frontalface_default.xml"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(URL_VISAGES, timeout=6) as r:
+            f.write_bytes(r.read())
+        return True
+    except Exception:
+        return False
+
+
+def nombre_visages(gris: np.ndarray) -> int:
+    if "c" not in _DETECTEUR:
+        try:
+            f = fichier_visages()
+            c = cv2.CascadeClassifier(f) if f else None
+            _DETECTEUR["c"] = c if (c is not None and not c.empty()) else None
+        except Exception:
+            _DETECTEUR["c"] = None
+    c = _DETECTEUR["c"]
+    if c is None:
+        return 0
+    t = max(24, int(min(gris.shape) * 0.05))
+    try:
+        return len(c.detectMultiScale(cv2.equalizeHist(gris), 1.1, 6, minSize=(t, t)))
+    except Exception:
+        return 0
+
+
+def rotation_par_visages(rgb: np.ndarray) -> int:
+    """Des visages n'apparaissent droits que si la photo est dans le bon sens."""
+    petit = redimensionner(rgb, 640)
+    g = cv2.cvtColor(petit, cv2.COLOR_RGB2GRAY)
+    n0 = nombre_visages(g)
+    if n0:
+        return 0
+    n90 = nombre_visages(cv2.rotate(g, cv2.ROTATE_90_CLOCKWISE))
+    n270 = nombre_visages(cv2.rotate(g, cv2.ROTATE_90_COUNTERCLOCKWISE))
+    if max(n90, n270) >= 1 and n90 != n270:
+        return 90 if n90 > n270 else 270
+    return 0
 
 
 def rotation_conseillee(rgb: np.ndarray) -> int:
@@ -282,7 +346,7 @@ def analyser(entree, dossier_miniatures):
     g0 = cv2.cvtColor(apercu, cv2.COLOR_RGB2GRAY)
     exposition_normale = np.mean(g0 >= 250) < 0.12 and 0.12 < g0.mean() / 255 < 0.85
     if orientation in (0, 1, None) and apercu.shape[1] > apercu.shape[0] and exposition_normale:
-        rotation = rotation_conseillee(apercu)
+        rotation = rotation_par_visages(apercu) or rotation_conseillee(apercu)
         apercu = tourner(apercu, rotation)
     gris = cv2.cvtColor(apercu, cv2.COLOR_RGB2GRAY)
     lum = gris.astype(np.float32) / 255.0
@@ -295,6 +359,7 @@ def analyser(entree, dossier_miniatures):
         "miniature": nom_mini,
         "rotation": rotation,
         "rotation_auto": rotation,
+        "orientation_appareil": int(orientation or 1),
         "largeur": int(apercu.shape[1]),
         "hauteur": int(apercu.shape[0]),
         "nettete": nettete(gris),
@@ -520,6 +585,7 @@ def lancer(dossier: Path, sortie: Path, processus: int, utiliser_ia=True, nombre
         return None
 
     photos, erreurs = [], []
+    preparer_visages()
     progres("Analyse des photos", 0, len(entrees))
     with ProcessPoolExecutor(max_workers=processus) as pool:
         futurs = {pool.submit(analyser, e, str(miniatures)): e for e in entrees}
