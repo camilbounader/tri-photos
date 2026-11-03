@@ -85,6 +85,35 @@ def nom_de(req):
     return re.split(r"[<>=!~\[ ]", req, 1)[0].strip().lower().replace("_", "-")
 
 
+def torch_ok():
+    """Teste PyTorch dans un processus séparé (un échec de chargement ne bloque pas la suite)."""
+    p = subprocess.run([sys.executable, "-c", "import torch; print('torch', torch.__version__)"],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+    return p.returncode == 0, p.stdout
+
+
+def reparer_dll():
+    """Ajoute les DLL Microsoft Visual C++ à côté de PyTorch (sans droits administrateur)."""
+    if os.name != "nt":
+        return
+    lancer(PIP + ["msvc-runtime"], "composants Visual C++")
+    torch_lib = Path(sysconfig.get_paths()["purelib"]) / "torch" / "lib"
+    if not torch_lib.is_dir():
+        return
+    copiees = 0
+    for racine in {Path(sys.prefix), Path(sys.base_prefix)}:
+        for dll in racine.rglob("*.dll"):
+            n = dll.name.lower()
+            if torch_lib in dll.parents:
+                continue
+            if n.startswith(("msvcp140", "vcruntime140", "concrt140", "vcomp140")):
+                cible = torch_lib / dll.name
+                if not cible.exists():
+                    shutil.copy2(dll, cible)
+                    copiees += 1
+    noter(f"  {copiees} composant(s) Visual C++ copié(s) à côté de PyTorch.")
+
+
 def installer_remplacant_yaml():
     dest = Path(sysconfig.get_paths()["purelib"]) / "yaml"
     dest.mkdir(parents=True, exist_ok=True)
@@ -99,23 +128,48 @@ def main():
     noter(f"Python {sys.version.split()[0]} · {platform.machine()} · {sysconfig.get_platform()} · "
           f"{8 * __import__('struct').calcsize('P')} bits · {sys.executable}")
 
+    # 0. Version de Python : l'IA (PyTorch) a besoin de Python 3.10 à 3.13
+    if not ((3, 10) <= sys.version_info[:2] <= (3, 13)):
+        noter(f"\nPython {sys.version.split()[0]} est trop récent pour l'IA (PyTorch n'est pas encore prêt pour lui).")
+        noter("Il faut réparer l'installation pour passer à Python 3.12 : bouton « Réparer l'installation » de l'accueil.",
+              "python_incompatible")
+        return 2
+
     # 1. PyTorch
     noter("\n[1/4] PyTorch (moteur de l'IA)")
-    try:
-        import torch  # noqa: F401
-        noter(f"  Déjà installé ({torch.__version__}).")
-        ok_torch = True
-    except ImportError:
-        ok_torch = False
-        if gpu_nvidia():
-            noter("  Carte NVIDIA détectée : version carte graphique (~3 Go).")
-            ok_torch = lancer(PIP + ["torch", "torchvision", "--index-url",
-                                     "https://download.pytorch.org/whl/cu128"], "PyTorch GPU")
-        if not ok_torch:
-            noter("  Version processeur (~300 Mo).")
-            ok_torch = lancer(PIP + ["torch", "torchvision", "--index-url",
-                                     "https://download.pytorch.org/whl/cpu"], "PyTorch processeur")
+    ok_torch, sortie = torch_ok()
+    if ok_torch:
+        noter(f"  Déjà installé ({sortie.strip().splitlines()[-1]}).")
+    else:
+        gpu = gpu_nvidia()
+        if "No module named" in sortie:
+            installe = False
+            if gpu:
+                noter("  Carte NVIDIA détectée : version carte graphique (~3 Go).")
+                installe = lancer(PIP + ["torch", "torchvision", "--index-url",
+                                         "https://download.pytorch.org/whl/cu128"], "PyTorch GPU")
+            if not installe:
+                noter("  Version processeur (~300 Mo).")
+                lancer(PIP + ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"],
+                       "PyTorch processeur")
+            ok_torch, sortie = torch_ok()
+        if not ok_torch and ("WinError 126" in sortie or "DLL" in sortie):
+            noter("  PyTorch ne trouve pas certains composants Windows (Visual C++) : on les ajoute.")
+            reparer_dll()
+            ok_torch, sortie = torch_ok()
+        if not ok_torch and "No module named" not in sortie:
+            noter("  On réinstalle la version processeur de PyTorch.")
+            lancer(PIP + ["--force-reinstall", "torch", "torchvision", "--index-url",
+                          "https://download.pytorch.org/whl/cpu"], "PyTorch processeur")
+            reparer_dll()
+            ok_torch, sortie = torch_ok()
     if not ok_torch:
+        noter("  ! PyTorch ne se charge pas :")
+        for l in sortie.strip().splitlines()[-6:]:
+            noter("    " + l)
+        if "WinError 126" in sortie:
+            noter("  Il manque probablement « Microsoft Visual C++ Redistributable 2015-2022 (x64) » sur ce PC.")
+            noter("  Sur un PC du travail, demande au service informatique de l'installer.")
         noter("\nÉCHEC : PyTorch n'a pas pu être installé.", "echec")
         return 1
 

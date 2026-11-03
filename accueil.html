@@ -98,6 +98,7 @@ footer{margin-top:40px;display:flex;gap:10px;flex-wrap:wrap;border-top:1px solid
 
   <footer>
     <a class="btn" href="/reglages">Réglages</a>
+    <a class="btn" href="/diagnostic">Diagnostic</a>
     <button class="btn" id="b-tel">Trier depuis le téléphone</button>
     <span style="flex:1"></span>
     <button class="btn" id="b-quitter">Quitter Tri Photos</button>
@@ -162,7 +163,12 @@ function rendre(){
 
   // IA
   const ins = D.installation_ia; let hi = '';
-  if(ia.verifie && !ia.dispo && !D.sur_telephone){
+  if(!D.python_ok && !D.sur_telephone){
+    hi = `<h2>IA</h2><div class="bloc" style="border-color:#5a4720"><h3 style="margin:0 0 4px;font-size:17px">Installation à réparer pour activer l'IA</h3>
+      <div class="note" style="color:var(--txt);margin:0">Tri Photos tourne avec Python ${esc(D.python)}, trop récent pour l'IA. La réparation réinstalle l'appli avec Python 3.12 puis installe l'IA (10 à 20 min, avec internet). Tes sorties et tes choix sont gardés.</div>
+      <div class="note">Une fenêtre bleue PowerShell va s'ouvrir et l'appli va se fermer pendant la réparation ; elle se rouvrira toute seule à la fin.</div>
+      <div class="ligne" style="margin-top:12px"><button class="btn principal" id="b-reparer" ${occupe?'disabled':''}>Réparer l'installation</button></div></div>`;
+  } else if(ia.verifie && !ia.dispo && !D.sur_telephone){
     const enCours = ins && ins.etat==='en cours';
     hi = `<h2>IA</h2><div class="bloc"><h3 style="margin:0 0 4px;font-size:17px">${enCours?'Installation de l\'IA en cours…':'L\'IA n\'est pas installée'}</h3>`;
     if(enCours){
@@ -179,6 +185,9 @@ function rendre(){
   $('#zone-ia').innerHTML = hi;
   if($('#b-ia')) $('#b-ia').onclick = async()=>{ try{ await post('/api/installer_ia'); charger(); }catch(e){ toast(e.message); } };
   if($('#b-journal')) $('#b-journal').onclick = ()=>post('/api/ouvrir_journal_ia');
+  if($('#b-reparer')) $('#b-reparer').onclick = async()=>{
+    if(!confirm('Lancer la réparation ? L\'appli va se fermer pendant 10 à 20 minutes.')) return;
+    try{ await post('/api/reparer'); toast('Réparation lancée dans la fenêtre PowerShell'); }catch(e){ toast(e.message); } };
 
   // Cartes SD (on garde ce que l'utilisateur a tapé dans le champ nom)
   document.querySelectorAll('[data-nom-sd]').forEach(i=>sdNoms[i.dataset.nomSd]=i.value);
@@ -210,7 +219,7 @@ function rendre(){
     const couv = s.couverture ? `background-image:url('/s/${s.sid}/mini/${encodeURIComponent(s.couverture)}.jpg')` : '';
     if(!s.a_jour) return `<div class="sortie"><a class="couv" href="#" data-maj="${s.sid}" style="${couv}"><span class="maj">Analyse à mettre à jour</span></a>
       <div class="corps"><h4 title="${esc(s.nom)}">${esc(s.nom)}</h4><div class="date">${fmtDate(s.date)} · ${s.n_photos} photos</div>
-      <div class="note" style="margin:0">Nouvelle détection du flou, plus juste. Tes choix faits à la main sont gardés.</div>
+      <div class="note" style="margin:0">Nouvelle version : flou mieux détecté, photos couchées redressées. Tes choix faits à la main sont gardés.</div>
       <div class="pied"><button class="btn principal" data-maj="${s.sid}" ${occupe?'disabled':''}>Mettre à jour</button>
         <button class="btn" data-retirer="${s.sid}">Retirer</button></div></div></div>`;
     return `<div class="sortie"><a class="couv" href="/s/${s.sid}/" style="${couv}">${s.exporte?'<span>Exportée</span>':''}</a>

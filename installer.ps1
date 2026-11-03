@@ -74,8 +74,22 @@ if (-not (Test-Path -LiteralPath $PyBase)) {
         $c = (Get-Command python -ErrorAction SilentlyContinue).Source
         if ($c -and ($c -notlike '*WindowsApps*') -and (Version-Ok $c)) { $PyBase = $c }
     }
+    if (-not $PyBase) {
+        # Dernier recours : Python 3.12 autonome via uv (sans droits administrateur)
+        Write-Host "Installation de Python 3.12 par une autre methode (uv)..." -ForegroundColor Yellow
+        try {
+            $env:UV_INSTALL_DIR = Join-Path $Base 'uv'
+            Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+            $uv = Join-Path $Base 'uv\uv.exe'
+            $env:UV_PYTHON_INSTALL_DIR = Join-Path $Base 'python-uv'
+            & $uv python install 3.12
+            $c = (& $uv python find 3.12).Trim()
+            if ($c -and (Version-Ok $c)) { $PyBase = $c }
+        } catch { Write-Host "uv : $($_.Exception.Message)" -ForegroundColor DarkGray }
+    }
     if (-not $PyBase) { Echec "Python n'a pas pu etre installe. Installe Python 3.12 depuis python.org puis relance cette ligne." }
 }
+if (-not (Version-Ok $PyBase)) { Echec "Python trouve ($PyBase) mais dans une version non prise en charge. Installe Python 3.12 depuis python.org puis relance." }
 Write-Host "Python : $PyBase" -ForegroundColor DarkGray
 
 # --- 2. L'appli ----------------------------------------------------------------
@@ -99,7 +113,14 @@ Write-Host "Version $($sha.Substring(0,7))" -ForegroundColor DarkGray
 # --- 3. Librairies -------------------------------------------------------------
 Etape 3 "Librairies photo"
 & $PyBase -c "import sys,platform,struct;print('Python',sys.version.split()[0],platform.machine(),struct.calcsize('P')*8,'bits')"
-if (-not (Test-Path $PyVenv)) {
+if ((Test-Path -LiteralPath $PyVenv) -and -not (Version-Ok $PyVenv)) {
+    Write-Host "L'environnement existant utilise une version de Python incompatible avec l'IA : on le recree avec Python 3.12." -ForegroundColor Yellow
+    Get-Process python, pythonw -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$DirVenv*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep 1
+    Supprimer $DirVenv
+    if (Test-Path -LiteralPath $PyVenv) { Echec "Impossible de remplacer l'ancien environnement : ferme la fenetre noire de Tri Photos puis relance l'installation." }
+}
+if (-not (Test-Path -LiteralPath $PyVenv)) {
     & $PyBase -m venv $DirVenv
     if ($LASTEXITCODE -ne 0) { Echec "Creation de l'environnement Python impossible." }
 }

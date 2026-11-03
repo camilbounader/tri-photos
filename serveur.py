@@ -10,6 +10,8 @@ en ligne) qui affiche l'appli dans le navigateur.
 
 import hashlib
 import io
+import platform
+import sys
 import json
 import os
 import secrets
@@ -66,6 +68,37 @@ def ecrire_json(chemin: Path, donnees):
 def taille_lisible(dossier: Path):
     o = sum(f.stat().st_size for f in dossier.iterdir() if f.is_file())
     return f"{o / 1e9:.1f} Go".replace(".", ",") if o >= 1e9 else f"{max(1, round(o / 1e6))} Mo"
+
+
+def noter_erreur(texte):
+    """Garde une trace des erreurs dans %LOCALAPPDATA%\\TriPhotos\\erreurs.log (page Diagnostic)."""
+    try:
+        f = config_tri.DONNEES / "erreurs.log"
+        if f.exists() and f.stat().st_size > 500_000:
+            f.write_text(f.read_text(encoding="utf-8", errors="replace")[-200_000:], encoding="utf-8")
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(f"--- {datetime.now():%d/%m/%Y %H:%M:%S}\n{texte.rstrip()}\n")
+    except Exception:
+        pass
+
+
+def diagnostic():
+    import importlib
+    infos = {"Tri Photos": version(), "Python": f"{platform.python_version()} ({sys.executable})",
+             "Windows": platform.platform(), "Dossier des données": str(config_tri.DONNEES)}
+    for mod in ("numpy", "cv2", "PIL", "rawpy", "exifread", "torch", "open_clip"):
+        try:
+            m = importlib.import_module(mod)
+            infos[mod] = getattr(m, "__version__", "ok")
+        except Exception as exc:
+            infos[mod] = f"absent ({type(exc).__name__}: {str(exc)[:120]})"
+
+    def fin(nom, n):
+        try:
+            return "\n".join((config_tri.DONNEES / nom).read_text(encoding="utf-8", errors="replace").splitlines()[-n:])
+        except Exception:
+            return "(vide)"
+    return {"infos": infos, "erreurs": fin("erreurs.log", 80), "installation_ia": fin("installation_ia.log", 40)}
 
 
 def ouvrir_dossier(chemin: Path):
@@ -220,6 +253,7 @@ class Session:
                 webbrowser.open("https://photos.google.com/")
         except Exception as exc:
             traceback.print_exc()
+            noter_erreur("Envoi\n" + traceback.format_exc())
             en.update(etat="erreur", message=str(exc))
 
     def sauver_decisions(self):
@@ -310,6 +344,7 @@ class Session:
                         f.result()
                     except Exception as exc:
                         erreurs.append(f"{futurs[f]} : {exc}")
+                        noter_erreur(f"Développement de {futurs[f]} : {exc!r}")
                     ex["fait"] += 1
 
             ex["message"] = "Préparation du dossier pour Google Photos…"
@@ -342,6 +377,7 @@ class Session:
             ouvrir_dossier(racine)
         except Exception as exc:
             traceback.print_exc()
+            noter_erreur("Export\n" + traceback.format_exc())
             ex.update(etat="erreur", message=str(exc))
 
     # --- Mise à l'écart des photos à supprimer ------------------------------------
@@ -475,6 +511,25 @@ class Appli:
             importlib.invalidate_caches()
             self._verifier_ia()
         threading.Thread(target=attendre, daemon=True).start()
+        return True
+
+    def reparer_installation(self):
+        """Relance l'installateur complet dans une nouvelle fenêtre PowerShell (dernière version)."""
+        import subprocess
+        import urllib.request
+        import mise_a_jour
+        if os.name != "nt":
+            raise RuntimeError("La réparation automatique ne fonctionne que sous Windows.")
+        try:
+            req = urllib.request.Request(f"https://api.github.com/repos/{mise_a_jour.DEPOT}/commits/main",
+                                         headers={"User-Agent": "tri-photos", "Accept": "application/vnd.github.sha"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                ref = r.read().decode().strip()[:40]
+        except Exception:
+            raise RuntimeError("Pas de connexion à internet : la réparation a besoin d'internet.")
+        url = f"https://raw.githubusercontent.com/{mise_a_jour.DEPOT}/{ref}/installer.ps1"
+        subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-Command",
+                          f"irm {url} | iex"], creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
         return True
 
     def etat_installation_ia(self):
@@ -626,6 +681,7 @@ class Appli:
                                       f"{len(resultat['photos'])} photos.")
         except Exception as exc:
             traceback.print_exc()
+            noter_erreur("Tâche de fond\n" + traceback.format_exc())
             self.tache.update(etat="erreur", message=str(exc))
 
     def lancer_import(self, racine: str, nom: str, analyser_ensuite=True):
@@ -671,6 +727,7 @@ class Appli:
                 self.tache.update(etat="termine", message=f"{len(fichiers)} fichiers copiés.")
         except Exception as exc:
             traceback.print_exc()
+            noter_erreur("Tâche de fond\n" + traceback.format_exc())
             self.tache.update(etat="erreur", message=str(exc))
 
     # --- Accès depuis le téléphone ---------------------------------------------------
@@ -754,6 +811,7 @@ def creer_gestionnaire(appli: Appli):
         def _erreur(self, exc, code=500):
             if not isinstance(exc, (KeyError, FileNotFoundError, RuntimeError, ValueError)):
                 traceback.print_exc()
+                noter_erreur(f"{self.command} {self.path}\n{traceback.format_exc()}")
             try:
                 self._json({"erreur": str(exc).strip("'")}, code)
             except Exception:
@@ -772,6 +830,10 @@ def creer_gestionnaire(appli: Appli):
                     return self._page("accueil.html", cookie)
                 if chemin == "/reglages":
                     return self._page("reglages.html")
+                if chemin == "/diagnostic":
+                    return self._page("diagnostic.html")
+                if chemin == "/api/diagnostic":
+                    return self._json(diagnostic())
                 if chemin == "/api/ping":
                     return self._json({"ok": True, "appli": "tri-photos"})
                 if chemin == "/api/accueil":
@@ -782,6 +844,8 @@ def creer_gestionnaire(appli: Appli):
                         "dossier_import": config_tri.config_locale()["dossier_import"],
                         "telephone": appli.serveur_tel is not None,
                         "installation_ia": appli.etat_installation_ia(),
+                        "python": platform.python_version(),
+                        "python_ok": (3, 10) <= sys.version_info[:2] <= (3, 13),
                         "sur_telephone": self.client_address[0] not in ("127.0.0.1", "::1")})
                 if chemin == "/api/tache":
                     return self._json(appli.tache)
@@ -883,6 +947,10 @@ def creer_gestionnaire(appli: Appli):
                     if not local:
                         raise ValueError("L'installation se lance depuis le PC.")
                     return self._json({"ok": appli.lancer_installation_ia()})
+                if chemin == "/api/reparer":
+                    if not local:
+                        raise ValueError("La réparation se lance depuis le PC.")
+                    return self._json({"ok": appli.reparer_installation()})
                 if chemin == "/api/ouvrir_journal_ia":
                     ouvrir_dossier(config_tri.DONNEES / "installation_ia.log")
                     return self._json({"ok": True})

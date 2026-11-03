@@ -371,8 +371,20 @@ $('#taille').onchange=e=>{try{localStorage.setItem('tri-taille',e.target.value)}
 /* --- Diaporama --- */
 const img = $('#d-img'), scene = $('#scene');
 function src(id){return `${B}/${retouche?'retouche':'original'}/${encodeURIComponent(id)}.jpg${vq(id)}`;}
-function ouvrir(i){if(i<0)return;idx=i;$('#diapo').classList.add('ouvert');document.body.style.overflow='hidden';afficher();}
-function fermer(){modeRecup=false;$('#diapo').classList.remove('ouvert');document.body.style.overflow='';scene.classList.remove('zoom');rendre();
+function ouvrir(i){if(i<0)return;idx=i;
+  if(!$('#diapo').classList.contains('ouvert')) history.pushState({v:'diapo'},'');
+  $('#diapo').classList.add('ouvert');document.body.style.overflow='hidden';afficher();}
+// Le bouton « Retour » du navigateur (ou de la souris) ferme l'outil puis le diaporama
+function fermer(){
+  const v = history.state && history.state.v;
+  if(v==='recup') history.go(-2); else if(v==='diapo') history.back(); else fermerDiapo();
+}
+window.addEventListener('popstate', () => {
+  const v = history.state && history.state.v;
+  if(v!=='recup' && modeRecup) fermerRecupInterne();
+  if(!v && $('#diapo').classList.contains('ouvert')) fermerDiapo();
+});
+function fermerDiapo(){modeRecup=false;$('#diapo').classList.remove('ouvert');document.body.style.overflow='';scene.classList.remove('zoom');rendre();
   const c=document.querySelector(`.photo[data-id="${CSS.escape(liste[idx]||'')}"]`);if(c)c.scrollIntoView({block:'center'});}
 function afficher(){
   const p = PH[liste[idx]];
@@ -386,7 +398,11 @@ function afficher(){
   $('#d-charge').hidden = false;
   const plein = new Image();
   plein.onload = () => { if(liste[idx]===p.id){ img.src = plein.src; $('#d-charge').hidden = true; } };
-  plein.onerror = () => { $('#d-charge').textContent = 'Impossible de charger la pleine qualité'; };
+  plein.onerror = async () => {
+    let msg = 'Impossible de charger la pleine qualité';
+    try{ const r = await fetch(plein.src); const j = await r.json(); if(j.erreur) msg += ' : ' + j.erreur; }catch(_){}
+    if(liste[idx]===p.id) $('#d-charge').textContent = msg + ' (voir Diagnostic sur l\'accueil)';
+  };
   plein.src = src(p.id);
   [idx+1, idx-1, idx+2].forEach(j=>{ if(j>=0 && j<liste.length){ const im=new Image(); im.src=src(liste[j]); }});
   panneau(p);
@@ -475,11 +491,13 @@ $('#d-gauche').onclick=()=>pivoter(-90); $('#d-droite').onclick=()=>pivoter(90);
 let RI = null, RR = null, rAttente = null, rZones = false, rUrl = null;
 const fmtEv = v => (v>0?'+':'') + Number(v).toFixed(2).replace('.',',').replace(/,?0+$/,'') + ' IL';
 async function ouvrirRecup(){
-  const id = liste[idx]; modeRecup = true; scene.classList.remove('zoom');
+  const id = liste[idx];
+  if(!modeRecup) history.pushState({v:'recup'},'');
+  modeRecup = true; scene.classList.remove('zoom');
   $('#d-recup').classList.add('on'); $('#d-badge').style.display='block'; $('#d-badge').textContent='Récupération (RAW)';
   $('#panneau').innerHTML = '<div class="bandeau n"><h3>Préparation du RAW…</h3><p style="margin:0;color:var(--doux)">Quelques secondes la première fois.</p></div>';
   try{ RI = await (await fetch(`${B}/recup_infos/${encodeURIComponent(id)}`)).json(); }
-  catch(e){ $('#panneau').innerHTML = '<div class="bandeau r"><h3>Impossible de lire cette photo</h3></div>'; return; }
+  catch(e){ $('#panneau').innerHTML = '<div class="bandeau r"><h3>Impossible de lire cette photo</h3><p style="margin:0">Va sur la page Diagnostic de l\'accueil et envoie-la à Claude.</p></div>'; return; }
   if(RI.erreur){ $('#panneau').innerHTML = `<div class="bandeau r"><h3>${esc(RI.erreur)}</h3></div>`; return; }
   RR = Object.assign({}, RI.enregistres || RI.auto);
   panneauRecup(); rendreRecup();
@@ -539,14 +557,17 @@ function rendreRecup(){
     const id = liste[idx], q = new URLSearchParams({ev:RR.ev, hl:RR.hl, bl:RR.bl, om:RR.om, zones:rZones?1:0});
     $('#d-charge').hidden = false; $('#d-charge').textContent = 'Développement du RAW…';
     try{
-      const blob = await (await fetch(`${B}/recup/${encodeURIComponent(id)}.jpg?${q}`)).blob();
+      const rep = await fetch(`${B}/recup/${encodeURIComponent(id)}.jpg?${q}`);
+      if(!rep.ok){ const j = await rep.json().catch(()=>({})); toast('Erreur : ' + (j.erreur || rep.status)); return; }
+      const blob = await rep.blob();
       if(!modeRecup || liste[idx]!==id) return;
       if(rUrl) URL.revokeObjectURL(rUrl);
       rUrl = URL.createObjectURL(blob); img.src = rUrl;
     } finally { $('#d-charge').hidden = true; $('#d-charge').textContent = 'Chargement en pleine qualité…'; }
   }, 120);
 }
-function fermerRecup(){
+function fermerRecup(){ if(history.state && history.state.v==='recup') history.back(); else fermerRecupInterne(); }
+function fermerRecupInterne(){
   modeRecup = false; $('#d-recup').classList.remove('on'); $('#d-badge').textContent='Retouche automatique';
   afficher();
 }

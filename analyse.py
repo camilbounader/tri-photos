@@ -40,7 +40,7 @@ EXT_RAW = {".nef", ".nrw", ".cr2", ".cr3", ".crw", ".arw", ".srf", ".sr2", ".raf
 EXT_JPG = {".jpg", ".jpeg"}
 TAILLE_APERCU = 1200    # côté long pour les mesures
 TAILLE_MINIATURE = 640  # côté long des vignettes de la grille (et pour l'IA)
-VERSION_ANALYSE = 4
+VERSION_ANALYSE = 5
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +208,7 @@ def rotation_conseillee(rgb: np.ndarray) -> int:
     bh, bw = max(2, int(h * 0.18)), max(2, int(w * 0.18))
     s = {"haut": ciel(np.s_[:bh, :]), "bas": ciel(np.s_[-bh:, :]),
          "gauche": ciel(np.s_[:, :bw]), "droite": ciel(np.s_[:, -bw:])}
-    if max(s["gauche"], s["droite"]) - max(s["haut"], s["bas"]) > 0.15 and abs(s["gauche"] - s["droite"]) > 0.3:
+    if max(s["gauche"], s["droite"]) - max(s["haut"], s["bas"]) > 0.08 and abs(s["gauche"] - s["droite"]) > 0.2:
         return 90 if s["gauche"] > s["droite"] else 270
     return 0
 
@@ -279,7 +279,9 @@ def analyser(entree, dossier_miniatures):
     apercu, capteur_sature, orientation = charger_apercu(entree, exif["orientation"])
     rotation = 0
     # L'appareil n'a pas noté d'orientation et la photo est en paysage : elle est peut-être couchée
-    if orientation in (0, 1, None) and apercu.shape[1] > apercu.shape[0]:
+    g0 = cv2.cvtColor(apercu, cv2.COLOR_RGB2GRAY)
+    exposition_normale = np.mean(g0 >= 250) < 0.12 and 0.12 < g0.mean() / 255 < 0.85
+    if orientation in (0, 1, None) and apercu.shape[1] > apercu.shape[0] and exposition_normale:
         rotation = rotation_conseillee(apercu)
         apercu = tourner(apercu, rotation)
     gris = cv2.cvtColor(apercu, cv2.COLOR_RGB2GRAY)
