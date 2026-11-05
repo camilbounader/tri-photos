@@ -24,7 +24,7 @@ $PyVenv  = Join-Path $DirVenv 'Scripts\python.exe'
 $PyUrl   = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
 # Fichiers temporaires dans notre dossier : le dossier TEMP de Windows a parfois un nom
 # court (ex. C:\Users\CB2E1~1.BOU) que PowerShell gere mal.
-$Tmp     = Join-Path $Base 'tmp'
+$DirTmp  = Join-Path $Base 'tmp'
 
 function Supprimer($chemin) {
     try { if (Test-Path -LiteralPath $chemin) { Remove-Item -LiteralPath $chemin -Recurse -Force -ErrorAction Stop } } catch {}
@@ -40,7 +40,7 @@ function Echec($texte) {
 Write-Host "=== Installation de Tri Photos ===" -ForegroundColor Green
 Write-Host "Dossier : $Base"
 New-Item -ItemType Directory -Force -Path $Base | Out-Null
-New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+New-Item -ItemType Directory -Force -Path $DirTmp | Out-Null
 
 # Si l'appli tourne deja, on la ferme proprement
 try { Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8765/api/quitter' -TimeoutSec 2 | Out-Null; Start-Sleep 2 } catch {}
@@ -52,14 +52,14 @@ function Version-Ok($exe) {
     try { $v = & $exe -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null; return @('3.10','3.11','3.12','3.13') -contains "$v".Trim() } catch { return $false }
 }
 if (-not (Test-Path -LiteralPath $PyBase)) {
-    $tmp = Join-Path $Tmp 'python-3.12.10-amd64.exe'
+    $PyExe = Join-Path $DirTmp 'python-3.12.10-amd64.exe'
     Write-Host "Telechargement de Python 3.12 (25 Mo)..."
-    Invoke-WebRequest -Uri $PyUrl -OutFile $tmp -UseBasicParsing
+    Invoke-WebRequest -Uri $PyUrl -OutFile $PyExe -UseBasicParsing
     Write-Host "Installation de Python pour Tri Photos uniquement (1-2 min)..."
-    $p = Start-Process -FilePath $tmp -Wait -PassThru -ArgumentList @(
+    $p = Start-Process -FilePath $PyExe -Wait -PassThru -ArgumentList @(
         '/quiet', 'InstallAllUsers=0', "TargetDir=`"$DirPy`"", 'PrependPath=0', 'Shortcuts=0',
         'Include_launcher=0', 'Include_test=0', 'Include_doc=0', 'AssociateFiles=0')
-    Supprimer $tmp
+    Supprimer $PyExe
 }
 if (-not (Test-Path -LiteralPath $PyBase)) {
     # Python 3.12 deja installe sur le PC : l'installateur ne le reinstalle pas ailleurs
@@ -97,8 +97,8 @@ Etape 2 "Telechargement de Tri Photos"
 try {
     $sha = (Invoke-RestMethod -Uri "https://api.github.com/repos/$Depot/commits/main" -Headers @{'User-Agent'='tri-photos'}).sha
 } catch { Echec "Impossible de joindre GitHub ($($_.Exception.Message))." }
-$zip = Join-Path $Tmp 'tri-photos.zip'
-$tmpDir = Join-Path $Tmp 'tri-photos-extrait'
+$zip = Join-Path $DirTmp 'tri-photos.zip'
+$tmpDir = Join-Path $DirTmp 'tri-photos-extrait'
 Invoke-WebRequest -Uri "https://codeload.github.com/$Depot/zip/$sha" -OutFile $zip -UseBasicParsing
 Supprimer $tmpDir
 Expand-Archive -LiteralPath $zip -DestinationPath $tmpDir -Force
