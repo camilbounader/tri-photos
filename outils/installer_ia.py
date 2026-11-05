@@ -30,7 +30,7 @@ import config_tri  # noqa: E402
 
 JOURNAL = config_tri.DONNEES / "installation_ia.log"
 ETAT = config_tri.DONNEES / "installation_ia.etat"
-PIP = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--prefer-binary"]
+PIP = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--prefer-binary", "--progress-bar", "off"]
 NE_PAS_INSTALLER = {"pyyaml", "torch", "torchvision"}
 
 
@@ -43,12 +43,21 @@ def noter(texte, etat=None):
 
 
 def lancer(cmd, titre):
+    """Lance pip en affichant sa progression en direct (et en la notant dans le journal)."""
     noter(f"\n$ {' '.join(cmd[2:])}")
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                       encoding="utf-8", errors="replace")
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                         encoding="utf-8", errors="replace", bufsize=1)
+    lignes = []
     with open(JOURNAL, "a", encoding="utf-8") as fh:
-        fh.write(p.stdout[-20000:])
-    lignes = [l for l in p.stdout.splitlines() if l.strip()]
+        for l in p.stdout:
+            l = l.rstrip()
+            if not l:
+                continue
+            lignes.append(l)
+            fh.write(l + "\n")
+            fh.flush()
+            print("    " + l[:150], flush=True)
+    p.wait()
     if p.returncode != 0:
         noter(f"  ! {titre} : échec. Dernières lignes :")
         for l in lignes[-8:]:
@@ -145,7 +154,8 @@ def main():
         if "No module named" in sortie:
             installe = False
             if gpu:
-                noter("  Carte NVIDIA détectée : version carte graphique (~3 Go).")
+                noter("  Carte NVIDIA détectée : version carte graphique (~3 Go, plusieurs minutes sans")
+                noter("  barre de progression pendant le téléchargement : c'est normal, laisse tourner).")
                 installe = lancer(PIP + ["torch", "torchvision", "--index-url",
                                          "https://download.pytorch.org/whl/cu128"], "PyTorch GPU")
             if not installe:
